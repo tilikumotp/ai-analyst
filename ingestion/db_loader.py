@@ -138,17 +138,27 @@ class DatabaseManager:
         tables = [row[0] for row in cursor.fetchall()]
         return tables
 
+    def get_table_columns(self, table_name: str) -> List[str]:
+        """Bir tablodaki gerçek kolon isimlerini listele."""
+        cursor = self.conn.cursor()
+        try:
+            cursor.execute(f"PRAGMA table_info({table_name});")
+            return [row[1] for row in cursor.fetchall()]
+        except Exception:
+            return []
+
     # ─────────────────────────────────────────────────────────
-    # Dynamic Schema Injection
+    # Dynamic Schema Injection & Data Profiling Helpers
     # ─────────────────────────────────────────────────────────
     def get_schema_context(self) -> str:
         """
-        LLM için Dinamik Semantik Şema (Dynamic Schema Injection) oluşturur.
+        LLM için Zenginleştirilmiş Dinamik Semantik Şema (Dynamic Schema Injection) oluşturur.
         
         Her tablo için:
-        - Kolon adları ve SQLite tipleri (PRAGMA table_info)
-        - Satır sayısı
-        - İlk 3 satır örnek veri
+        - Kolon adları, SQLite tipleri
+        - Kategorik kolonlar için örnek tekil değerler (['Hyundai', 'Ford', ...])
+        - Sayısal kolonlar için min / max değerleri
+        - Toplam satır sayısı ve ilk 3 satır örnek veri
         """
         tables = self.get_table_names()
         if not tables:
@@ -173,7 +183,26 @@ class DatabaseManager:
             for col in columns_info:
                 col_name = col[1]
                 col_type = col[2] or "TEXT"
-                col_descriptions.append(f"    - `{col_name}` ({col_type})")
+                
+                # Zenginleştirilmiş kolon detayı: distinct değerler veya min/max
+                detail_str = ""
+                try:
+                    # Metin / kategorik ise en sık geçen birkaç tekil değeri göster
+                    if "INT" in col_type.upper() or "REAL" in col_type.upper() or "FLOAT" in col_type.upper() or "NUM" in col_type.upper():
+                        cursor.execute(f"SELECT MIN({col_name}), MAX({col_name}), ROUND(AVG({col_name}), 2) FROM {tbl} WHERE {col_name} IS NOT NULL;")
+                        min_v, max_v, avg_v = cursor.fetchone()
+                        if min_v is not None:
+                            detail_str = f" [Min: {min_v}, Max: {max_v}, Ort: {avg_v}]"
+                    else:
+                        cursor.execute(f"SELECT DISTINCT {col_name} FROM {tbl} WHERE {col_name} IS NOT NULL LIMIT 6;")
+                        distinct_samples = [str(r[0]) for r in cursor.fetchall() if str(r[0]).strip()]
+                        if distinct_samples:
+                            sample_preview = ", ".join(f"'{s}'" for s in distinct_samples[:5])
+                            detail_str = f" [Örnek Değerler: {sample_preview}]"
+                except Exception:
+                    pass
+
+                col_descriptions.append(f"    - `{col_name}` ({col_type}){detail_str}")
 
             # 3) Örnek ilk 3 satır
             cursor.execute(f"SELECT * FROM {tbl} LIMIT 3;")
@@ -184,7 +213,7 @@ class DatabaseManager:
             sample_str = sample_df.to_string(index=False)
 
             table_block = f"""━━━ 📊 Tablo: `{tbl}` ({total_rows:,} satır) ━━━
-Kolonlar:
+Kolonlar ve Değer Aralıkları:
 {chr(10).join(col_descriptions)}
 
 Örnek Veriler (İlk 3 Satır):
@@ -193,6 +222,35 @@ Kolonlar:
             schema_parts.append(table_block)
 
         return "\n\n".join(schema_parts)
+
+    def get_column_profile(
+        self, table_name: str, column_name: str, top_n: int = 15
+    ) -> pd.DataFrame:
+        """
+        Belirli bir kolonun frekans dağılımını (value counts) ve yüzdelerini deterministik hesaplar.
+        """
+        clean_tbl = sanitize_table_name(table_name)
+        clean_col = sanitize_column_name(column_name)
+        
+        query = f"""
+        SELECT 
+            {clean_col} AS Deger,
+            COUNT(*) AS Adet,
+            ROUND(COUNT(*) * 100.0 / (SELECT COUNT(*) FROM {clean_tbl}), 2) AS Yuzde
+        FROM {clean_tbl}
+        GROUP BY {clean_col}
+        ORDER BY Adet DESC
+        LIMIT {int(top_n)};
+        """
+        return self.execute_query(query)
+
+    def read_sample_rows(
+        self, table_name: str, limit: int = 10, offset: int = 0
+    ) -> pd.DataFrame:
+        """Tablodan belirli sayıda satır oku."""
+        clean_tbl = sanitize_table_name(table_name)
+        query = f"SELECT * FROM {clean_tbl} LIMIT {int(limit)} OFFSET {int(offset)};"
+        return self.execute_query(query)
 
     # ─────────────────────────────────────────────────────────
     # Güvenli SQL Çalıştırma

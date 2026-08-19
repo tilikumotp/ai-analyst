@@ -791,10 +791,12 @@ else:
             # Teknik Detaylar ve Yönetişim
             applied_metrics = msg.get("applied_metrics", [])
             sql_query = msg.get("sql_query")
+            executed_code = msg.get("executed_code") or sql_query
+            code_type = msg.get("code_type", "python" if not sql_query else "sql")
             res_df = msg.get("result_df")
 
-            if applied_metrics or sql_query or (res_df is not None and not res_df.empty):
-                with st.expander("🔍 Teknik Detayları ve SQL Sorgusunu Göster", expanded=False):
+            if applied_metrics or executed_code or (res_df is not None and not res_df.empty):
+                with st.expander("🔍 Teknik Detayları ve Çalıştırılan Kodu Göster", expanded=False):
                     if applied_metrics:
                         st.markdown("##### 🛡️ Uygulanan Şirket İş Kuralları (Data Governance)")
                         for m in applied_metrics:
@@ -810,19 +812,23 @@ else:
                             st.code(f"Formül: {s_form}\nFiltre: {m_filt or 'Yok'}", language="sql")
                             st.markdown("---")
 
-                    if sql_query:
-                        st.markdown("##### 💾 Çalıştırılan SQL Sorgusu")
-                        st.code(sql_query, language="sql")
+                    if executed_code:
+                        if code_type == "python":
+                            st.markdown("##### 🐍 Çalıştırılan Pandas / Python Kodu")
+                            st.code(executed_code, language="python")
+                        else:
+                            st.markdown("##### 💾 Çalıştırılan SQL Sorgusu")
+                            st.code(executed_code, language="sql")
 
                     if res_df is not None and not res_df.empty:
-                        st.markdown(f"##### 📊 Sorgu Sonuç Tablosu ({len(res_df):,} kayıt)")
+                        st.markdown(f"##### 📊 Sonuç Tablosu ({len(res_df):,} kayıt)")
                         st.dataframe(res_df, width="stretch")
 
                         csv_bytes = res_df.to_csv(index=False).encode("utf-8-sig")
                         st.download_button(
                             label="📥 Bu Tabloyu İndir (CSV)",
                             data=csv_bytes,
-                            file_name=f"sql_sonucu_{idx}.csv",
+                            file_name=f"analiz_sonucu_{idx}.csv",
                             mime="text/csv",
                             key=f"dl_sql_{idx}",
                         )
@@ -830,10 +836,10 @@ else:
             if msg.get("error"):
                 st.error(msg["error"])
 
-    # ── Sohbet Girişi ──
-    prompt = st.chat_input("Verileriniz hakkında soru sorun (örn: 'Bu ayki net ciroyu ve sepet ortalamasını göster')...")
+    # ── Kullanıcı Mesaj Girişi ──
+    prompt = st.chat_input("Veri setiniz hakkında bir soru sorun (örn: 'En çok satan ilk 5 marka hangisi?')...")
 
-    if st.session_state.pending_prompt:
+    if not prompt and st.session_state.pending_prompt:
         prompt = st.session_state.pending_prompt
         st.session_state.pending_prompt = None
 
@@ -855,7 +861,7 @@ else:
                 st.session_state.messages.append({"role": "assistant", "content": error_msg})
 
             else:
-                with st.status("🧠 ReAct & Semantic Layer çalışıyor...", expanded=True) as status_box:
+                with st.status("🧠 ReAct & Veri Analiz Katmanı çalışıyor...", expanded=True) as status_box:
                     status_container = st.empty()
 
                     def update_status(step_type: str, text: str):
@@ -869,6 +875,8 @@ else:
                     step_result, raw_resp = st.session_state.agent.execute_react_cycle(
                         user_message=prompt,
                         chat_history=chat_history,
+                        datasets=st.session_state.datasets,
+                        active_key=st.session_state.active_dataset,
                         status_callback=update_status,
                     )
 
@@ -891,9 +899,10 @@ else:
                     for fig in step_result.figures:
                         st.plotly_chart(fig, width="stretch")
 
-                # Teknik Detaylar, SQL ve Yönetişim
-                if step_result.has_applied_metrics or step_result.sql_query or step_result.has_table:
-                    with st.expander("🔍 Teknik Detayları ve SQL Sorgusunu Göster", expanded=False):
+                # Teknik Detaylar, Kod ve Yönetişim
+                has_code = bool(step_result.executed_code or step_result.sql_query)
+                if step_result.has_applied_metrics or has_code or step_result.has_table:
+                    with st.expander("🔍 Teknik Detayları ve Çalıştırılan Kodu Göster", expanded=False):
                         if step_result.has_applied_metrics:
                             st.markdown("##### 🛡️ Uygulanan Şirket İş Kuralları (Data Governance)")
                             for m in step_result.applied_metrics:
@@ -902,12 +911,16 @@ else:
                                 st.code(f"Formül: {m.sql_formula}\nFiltre: {m.mandatory_filters or 'Yok'}", language="sql")
                                 st.markdown("---")
 
-                        if step_result.sql_query:
-                            st.markdown("##### 💾 Çalıştırılan SQL Sorgusu")
-                            st.code(step_result.sql_query, language="sql")
+                        if has_code:
+                            if step_result.code_type == "python":
+                                st.markdown("##### 🐍 Çalıştırılan Pandas / Python Kodu")
+                                st.code(step_result.executed_code, language="python")
+                            else:
+                                st.markdown("##### 💾 Çalıştırılan SQL Sorgusu")
+                                st.code(step_result.executed_code or step_result.sql_query, language="sql")
 
                         if step_result.has_table:
-                            st.markdown(f"##### 📊 Sorgu Sonuç Tablosu ({len(step_result.result_df):,} kayıt)")
+                            st.markdown(f"##### 📊 Sonuç Tablosu ({len(step_result.result_df):,} kayıt)")
                             st.dataframe(step_result.result_df, width="stretch")
 
                             csv_bytes = step_result.result_df.to_csv(index=False).encode("utf-8-sig")

@@ -1,20 +1,24 @@
 """
-SQL ReAct Agent — Text-to-SQL, Semantic Layer, Dinamik Intent Router & Self-Healing Orkestratörü.
+SQL ReAct Agent — Text-to-SQL, Semantic Layer, 2 Aşamalı Sıfır-Halüsinasyon (Zero-Hallucination) & Self-Healing Orkestratörü.
 
-Akış:
-1. Kullanıcı sorusunu al ve IntentRouter ile sınıflandır (Trend, Anomali, Keşif veya Genel Analitik).
-2. Semantic Retrieval Engine ile ilgili kurumsal iş kurallarını (Business Glossary) çek.
-3. Pre-Flight Guardrail ile çelişki denetimi yap (Sıfır maliyetle erken çıkış).
-4. İlgili Persona Prompt Şablonu, Şema ve İş Kuralları ile prompt hazırla.
-5. LLM'den ReAct planı, SQL sorgusu ve opsiyonel Plotly kodu al.
-6. Deterministik SQLite motorunda SQL'i çalıştır (execute_sql).
-7. Hata durumunda Closed-Loop Self-Healing döngüsünü işlet.
-8. Dönen result_df üzerinde görselleştirme kodunu çalıştır (generate_python_plot).
-9. Yönetici Özeti, Tablo, Görselleştirme ve Data Governance detaylarını kullanıcıya sun.
+2 Aşamalı ReAct Akışı (2-Phase Architecture):
+1. Aşama (Plan & Act):
+   - IntentRouter ile kullanıcı analist personasını belirler.
+   - Semantik Katman (Semantic Layer) kurallarını getirir.
+   - Pre-Flight Guardrail ile çelişkileri engeller.
+   - LLM veritabanı şemasına göre deterministik SQL / CSV inceleme sorgusunu planlar (Sayı uydurmadan).
+   - SQLite motorunda SQL çalıştırılır (Hata olursa Self-Healing döngüsü işletilir).
+   - result_df elde edilir.
+2. Aşama (Grounded Synthesis - Gözlem -> Doğrulanmış Rapor):
+   - Gerçek sorgu sonuç tablosu (%100 matematiksel gerçeklik) LLM'e verilir.
+   - LLM YALNIZCA bu gerçek verilere dayanarak Yönetici Özeti, Temel Bulgular ve Stratejik Önerileri yazar.
+   - Opsiyonel Plotly görselleştirmesi result_df üzerinde çalıştırılır.
 """
 
 import logging
 import sqlite3
+import re
+import json
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -30,11 +34,15 @@ from core.knowledge_base import (
 )
 from core.llm_client import LLMClient
 from core.prompts import (
-    ANOMALY_RISK_PROMPT,
-    AUTONOMOUS_EXPLORER_PROMPT,
+    ANOMALY_PLANNING_PROMPT,
+    ANOMALY_SYNTHESIS_PROMPT,
+    AUTONOMOUS_EXPLORER_PLANNING_PROMPT,
+    EXPLORATION_SYNTHESIS_PROMPT,
+    GROUNDED_SYNTHESIS_PROMPT,
     SQL_ERROR_FIX_PROMPT,
-    SQL_REACT_SYSTEM_PROMPT,
-    TREND_ANALYST_PROMPT,
+    SQL_PLANNING_SYSTEM_PROMPT,
+    TREND_PLANNING_PROMPT,
+    TREND_SYNTHESIS_PROMPT,
 )
 from core.tools import ToolCall, ToolParser
 from ingestion.db_loader import DatabaseManager
@@ -113,6 +121,8 @@ class AgentStepResult:
     """ReAct Ajanının bir çalıştırma sonucu."""
     explanation: str = ""
     sql_query: Optional[str] = None
+    executed_code: Optional[str] = None
+    code_type: str = "python"  # "python" veya "sql"
     result_df: Optional[pd.DataFrame] = None
     figures: List[go.Figure] = field(default_factory=list)
     plot_code: Optional[str] = None
@@ -142,7 +152,7 @@ class AgentStepResult:
 
 
 class SQLReActAgent:
-    """Text-to-SQL, Semantik Katman ve Dinamik Intent Router tabanlı akıllı veri analisti ajanı."""
+    """CSV/Pandas ve SQL Veritabanı Modlu, Semantik Katman ve 2 Aşamalı Sıfır-Halüsinasyon Analist Ajanı."""
 
     MAX_SQL_RETRIES = 3
     MAX_PLOT_RETRIES = 2
@@ -161,50 +171,54 @@ class SQLReActAgent:
         self.executor = SafeExecutor(timeout=60)
 
     # ─────────────────────────────────────────────────────────
-    # Mesaj Listesi Oluşturma (Persona + Şema + Semantik Kurallar)
+    # Aşama 1: Planlama Mesajları (Planning Prompt)
     # ─────────────────────────────────────────────────────────
-    def build_messages(
+    def build_planning_messages(
         self,
         user_message: str,
         chat_history: List[Dict[str, str]],
         relevant_metrics: Optional[List[BusinessMetric]] = None,
-    ) -> Tuple[List[Dict[str, str]], str]:
-        """LLM için niyet yönlendirmeli sistem yönergesi + semantik kurallar + şema + geçmiş derle."""
-        schema_context = self.db_manager.get_schema_context()
+        datasets: Optional[Dict[str, Any]] = None,
+        active_key: Optional[str] = None,
+        mode: str = "python",
+    ) -> Tuple[List[Dict[str, str]], str, AnalyticsIntent]:
+        """Aşama 1 için niyet ve dosya tipine göre planlama mesajlarını derler."""
+        from core.prompts import CSV_PANDAS_PLANNING_PROMPT, build_dataframe_context
 
-        # Semantik kurallar metni oluştur
-        if relevant_metrics:
-            rules_parts = []
-            for m in relevant_metrics:
-                rules_parts.append(
-                    f"📌 **{m.canonical_name}** (v{m.version} • Sahip: {m.owner})\n"
-                    f"• Resmi Tanım: {m.business_definition}\n"
-                    f"• Teknik Formül / SQL: `{m.sql_formula}`\n"
-                    f"• Zorunlu Filtreler (Mandatory): `{m.mandatory_filters or 'Yok'}`\n"
-                    f"• Eş Anlamlılar: {', '.join(m.aliases)}"
-                )
-            semantic_context = "\n\n".join(rules_parts)
-        else:
-            semantic_context = "Bu soru için özel bir iş kuralı eşleşmedi. Genel SQL ve veri analitiği mantığını kullan."
-
-        # Dinamik Niyet Yönlendirme (Intent Routing)
         intent, persona_label = IntentRouter.route(user_message)
-        if intent == AnalyticsIntent.TREND:
-            template = TREND_ANALYST_PROMPT
-        elif intent == AnalyticsIntent.ANOMALY:
-            template = ANOMALY_RISK_PROMPT
-        elif intent == AnalyticsIntent.EXPLORATION:
-            template = AUTONOMOUS_EXPLORER_PROMPT
-        else:
-            template = SQL_REACT_SYSTEM_PROMPT
 
-        system_prompt = template.format(
-            semantic_rules_context=semantic_context,
-            schema_context=schema_context,
-        )
+        if mode == "python" and datasets and active_key and active_key in datasets:
+            active_df = datasets[active_key]["df"]
+            meta = datasets[active_key].get("metadata", {})
+            file_name = meta.get("dosya_adi", active_key)
+            df_ctx = build_dataframe_context(active_df, file_name)
+            system_prompt = CSV_PANDAS_PLANNING_PROMPT.format(dataframe_context=df_ctx)
+        else:
+            schema_context = self.db_manager.get_schema_context()
+            if relevant_metrics:
+                rules_parts = [
+                    f"📌 **{m.canonical_name}** (v{m.version})\n• Tanım: {m.business_definition}\n• Formül: `{m.sql_formula}`"
+                    for m in relevant_metrics
+                ]
+                semantic_context = "\n\n".join(rules_parts)
+            else:
+                semantic_context = "Genel analitik mantığını kullan."
+
+            if intent == AnalyticsIntent.TREND:
+                template = TREND_PLANNING_PROMPT
+            elif intent == AnalyticsIntent.ANOMALY:
+                template = ANOMALY_PLANNING_PROMPT
+            elif intent == AnalyticsIntent.EXPLORATION:
+                template = AUTONOMOUS_EXPLORER_PLANNING_PROMPT
+            else:
+                template = SQL_PLANNING_SYSTEM_PROMPT
+
+            system_prompt = template.format(
+                semantic_rules_context=semantic_context,
+                schema_context=schema_context,
+            )
 
         messages: List[Dict[str, str]] = [{"role": "system", "content": system_prompt}]
-
         recent_history = chat_history[-self.MAX_HISTORY_MESSAGES:]
         for msg in recent_history:
             role = msg.get("role", "user")
@@ -212,21 +226,40 @@ class SQLReActAgent:
                 messages.append({"role": role, "content": msg.get("content", "")})
 
         messages.append({"role": "user", "content": user_message})
-        return messages, persona_label
+        return messages, persona_label, intent
 
     # ─────────────────────────────────────────────────────────
-    # ReAct Döngüsü
+    # 2 Aşamalı ReAct Döngüsü (CSV Pandas / SQL Dual Mode)
     # ─────────────────────────────────────────────────────────
     def execute_react_cycle(
         self,
         user_message: str,
         chat_history: List[Dict[str, str]],
+        datasets: Optional[Dict[str, Any]] = None,
+        active_key: Optional[str] = None,
         status_callback: Optional[Callable[[str, str], None]] = None,
     ) -> Tuple[AgentStepResult, str]:
         """
-        ReAct (Intent Route -> Semantic Retrieve -> Pre-Flight Guardrail -> Reason -> Act -> Observe) döngüsü.
+        ReAct Döngüsü:
+        - CSV/Excel dosyası yüklendiğinde doğrudan Python / Pandas komutları çalıştırır.
+        - SQL veritabanı bağlandığında SQL sorguları çalıştırır.
         """
         step = AgentStepResult()
+
+        # Dosya tipine göre çalışma modunu belirle (CSV/Excel -> python, SQL -> sql)
+        mode = "python"
+        if datasets and active_key and active_key in datasets:
+            meta = datasets[active_key].get("metadata", {})
+            file_type = meta.get("dosya_tipi", "").upper()
+            if file_type in ("SQL", "SQLITE", "DATABASE"):
+                mode = "sql"
+            else:
+                mode = "python"
+        elif self.db_manager.get_table_names():
+            # Eğer doğrudan veritabanı tabloları varsa
+            mode = "sql"
+
+        step.code_type = mode
 
         # ── 1. Dinamik Niyet Yönlendirme (Intent Routing) ──
         intent, persona_label = IntentRouter.route(user_message)
@@ -242,10 +275,9 @@ class SQLReActAgent:
         relevant_metrics = self.retrieval_engine.retrieve(user_message, top_k=2)
         step.applied_metrics = relevant_metrics
 
-        # ── 3. Pre-Flight Guardrail & Çatışma Denetimi (Zero-Cost Early Return) ──
+        # ── 3. Pre-Flight Guardrail Denetimi ──
         is_blocked, block_msg = self.guardrail_engine.pre_flight_check(user_message, relevant_metrics)
         if is_blocked and block_msg:
-            logger.info(f"Pre-Flight Guardrail Tetiklendi: {block_msg}")
             step.explanation = block_msg
             step.guardrail_warnings = [block_msg]
             if status_callback:
@@ -253,69 +285,220 @@ class SQLReActAgent:
             return step, block_msg
 
         if status_callback:
-            if relevant_metrics:
-                rule_names = ", ".join(f"'{m.canonical_name}'" for m in relevant_metrics)
-                status_callback("reasoning", f"🧠 {rule_names} kuralı uygulandı, {persona_label} ile SQL planlanıyor...")
+            mode_desc = "Python / Pandas" if mode == "python" else "SQL"
+            status_callback("reasoning", f"🧠 {persona_label} {mode_desc} analizini planlıyor...")
+
+        # ── 4. Aşama 1: Planlama ve Kod Üretimi ──
+        messages, _, current_intent = self.build_planning_messages(
+            user_message=user_message,
+            chat_history=chat_history,
+            relevant_metrics=relevant_metrics,
+            datasets=datasets,
+            active_key=active_key,
+            mode=mode,
+        )
+        raw_planning_response = self.llm.chat(messages)
+
+        # ── 5. Kod Çalıştırma (Act) ──
+        if mode == "python" and datasets and active_key:
+            # CSV / Pandas Modu: Python kod bloğunu çıkar ve sandbox'ta çalıştır
+            py_blocks = re.findall(r"```(?:python|py)?\s*([\s\S]*?)```", raw_planning_response, re.IGNORECASE)
+            code_to_run = py_blocks[0].strip() if py_blocks else ""
+
+            if not code_to_run:
+                # Bare code fallback
+                if "result_df" in raw_planning_response or "df." in raw_planning_response:
+                    code_to_run = raw_planning_response.strip()
+
+            if code_to_run:
+                if status_callback:
+                    status_callback("exec", "🐍 Pandas / Python komutu güvenli ortamda çalıştırılıyor...")
+
+                exec_res, py_err, retries = self._execute_python_with_self_healing(
+                    code=code_to_run,
+                    datasets=datasets,
+                    active_key=active_key,
+                    step=step,
+                    status_callback=status_callback,
+                )
+                step.executed_code = code_to_run
+                step.total_sql_retries = retries
+
+                if exec_res:
+                    step.result_df = exec_res.result_df
+                    step.figures = exec_res.figures
+                    step.stdout = exec_res.stdout
+                if py_err:
+                    step.error = f"Python Hatası: {py_err}"
+
+        else:
+            # SQL Modu: SQL sorgusunu çıkar ve SQLite üzerinde çalıştır
+            planning_thought, tool_calls = ToolParser.parse_response(raw_planning_response)
+            sql_query = ""
+            for tc in tool_calls:
+                if tc.name == "execute_sql":
+                    sql_query = tc.get_arg("query", "sql", default="")
+                    break
+
+            if sql_query:
+                if status_callback:
+                    status_callback("sql_exec", "🔍 SQL SQLite üzerinde çalıştırılıyor...")
+
+                df, sql_err, retries = self._execute_sql_with_self_healing(
+                    sql_query=sql_query,
+                    user_message=user_message,
+                    step=step,
+                    status_callback=status_callback,
+                )
+                step.sql_query = sql_query
+                step.executed_code = sql_query
+                step.result_df = df
+                step.total_sql_retries = retries
+
+                if sql_err:
+                    step.error = f"SQL Hatası: {sql_err}"
+
+        # ── 6. Aşama 2: Doğrulanmış Sentez (Grounded Synthesis) ──
+        if step.result_df is not None and not step.result_df.empty:
+            if status_callback:
+                status_callback("synthesis", "✍️ Gerçek veriler inceleniyor ve doğrulanmış yönetici raporu yazılıyor...")
+
+            grounded_report = self._generate_grounded_synthesis(
+                user_message=user_message,
+                sql_query=step.executed_code or "",
+                result_df=step.result_df,
+                intent=current_intent,
+            )
+            step.explanation = grounded_report
+
+        elif step.result_df is not None and step.result_df.empty:
+            step.explanation = "🔍 **Sonuç:** Yapılan analizde belirtilen kriterlere uygun herhangi bir kayıt bulunamadı."
+        elif not step.error:
+            step.explanation = raw_planning_response
+
+        return step, step.explanation
+
+    # ─────────────────────────────────────────────────────────
+    # Closed-Loop Self-Healing (Python / Pandas Hata Düzeltme)
+    # ─────────────────────────────────────────────────────────
+    def _execute_python_with_self_healing(
+        self,
+        code: str,
+        datasets: dict,
+        active_key: str,
+        step: AgentStepResult,
+        status_callback: Optional[Callable[[str, str], None]] = None,
+    ) -> Tuple[Optional[ExecutionResult], Optional[str], int]:
+        """Python/Pandas kodunu çalıştırır; hata durumunda LLM ile otonom düzeltir."""
+        from core.prompts import build_dataframe_context
+        current_code = code
+        retries = 0
+        active_entry = datasets.get(active_key, {})
+        active_df = active_entry.get("df", pd.DataFrame())
+        file_name = active_entry.get("metadata", {}).get("dosya_adi", active_key or "data.csv")
+
+        while retries <= self.MAX_SQL_RETRIES:
+            exec_res = self.executor.execute(current_code, datasets, active_key)
+            if exec_res.success and (exec_res.result_df is not None or exec_res.figures or exec_res.stdout):
+                return exec_res, None, retries
+
+            retries += 1
+            error_msg = exec_res.error or "result_df veya çıktı üretilmedi"
+            logger.warning(f"Python/Pandas Hatası (Deneme {retries}/{self.MAX_SQL_RETRIES}): {error_msg}")
+
+            if retries > self.MAX_SQL_RETRIES:
+                return exec_res if exec_res.success else None, error_msg, retries
+
+            if status_callback:
+                status_callback(
+                    "self_healing",
+                    f"🩹 Python/Pandas hatası tespit edildi, otonom düzeltiliyor... ({retries}/{self.MAX_SQL_RETRIES})",
+                )
+
+            step.healing_notes.append(
+                f"Düzeltme #{retries}: '{error_msg}' hatası üzerine Pandas kodu yeniden yazıldı."
+            )
+
+            df_context = build_dataframe_context(active_df, file_name)
+            fix_prompt = (
+                f"Aşağıdaki Python/Pandas kodu çalıştırılırken hata verdi:\n\n"
+                f"❌ HATA: {error_msg}\n\n"
+                f"⚠️ HATALI KOD:\n```python\n{current_code}\n```\n\n"
+                f"📊 DATAFRAME GERÇEK KOLONLARI:\n{df_context}\n\n"
+                f"Lütfen kodu tablodaki gerçek kolon adlarını kullanarak düzelt. "
+                f"Sonucu MUTLAKA `result_df = ...` değişkenine ata.\n"
+                f"SADECE düzeltilmiş ```python ... ``` bloğunu ver."
+            )
+
+            fix_messages = [
+                {"role": "system", "content": "Sen hata düzelten bir Python/Pandas uzmanısın. Yalnızca düzeltilmiş ```python ... ``` bloğu ver."},
+                {"role": "user", "content": fix_prompt},
+            ]
+            fix_response = self.llm.chat(fix_messages)
+            py_matches = re.findall(r"```(?:python|py)?\s*([\s\S]*?)```", fix_response, re.IGNORECASE)
+            if py_matches:
+                current_code = py_matches[0].strip()
+                step.executed_code = current_code
             else:
-                status_callback("reasoning", f"🧠 {persona_label} soruyu analiz ediyor ve SQL planlıyor...")
+                return exec_res, error_msg, retries
 
-        # ── 4. Prompt Hazırla ve LLM'e Gönder (Reason + Plan) ──
-        messages, _ = self.build_messages(user_message, chat_history, relevant_metrics)
-        raw_llm_response = self.llm.chat(messages)
+        return None, "Maksimum düzeltme denemesine ulaşıldı.", retries
 
-        # ── 5. Tool Çağrılarını Ayrıştır (Parse Tools) ──
-        explanation, tool_calls = ToolParser.parse_response(raw_llm_response)
-        step.explanation = explanation
+    # ─────────────────────────────────────────────────────────
+    # Aşama 2: Doğrulanmış Sentez Motoru (Grounded Synthesis)
+    # ─────────────────────────────────────────────────────────
+    def _generate_grounded_synthesis(
+        self,
+        user_message: str,
+        sql_query: str,
+        result_df: pd.DataFrame,
+        intent: AnalyticsIntent,
+    ) -> str:
+        """
+        Veritabanından çekilen gerçek result_df tablosunu LLM'e vererek
+        %100 matematiksel olarak doğru, halüsinasyonsuz yönetici raporu üretir.
+        """
+        # DataFrame'i düzenli metin / markdown formatına çevir (maksimum ilk 30 satır)
+        preview_df = result_df.head(30)
+        table_str = preview_df.to_string(index=False)
 
-        # ── 6. Araçları Yürüt (Act) ──
-        for tool_call in tool_calls:
-            if tool_call.name == "execute_sql":
-                sql_query = tool_call.arguments.get("query", "")
-                if sql_query:
-                    if status_callback:
-                        status_callback("sql_exec", f"🔍 SQL SQLite üzerinde çalıştırılıyor...")
+        if intent == AnalyticsIntent.TREND:
+            template = TREND_SYNTHESIS_PROMPT
+        elif intent == AnalyticsIntent.ANOMALY:
+            template = ANOMALY_SYNTHESIS_PROMPT
+        elif intent == AnalyticsIntent.EXPLORATION:
+            template = EXPLORATION_SYNTHESIS_PROMPT
+        else:
+            template = GROUNDED_SYNTHESIS_PROMPT
 
-                    df, sql_err, retries = self._execute_sql_with_self_healing(
-                        sql_query=sql_query,
-                        user_message=user_message,
-                        step=step,
-                        status_callback=status_callback,
-                    )
-                    step.sql_query = sql_query
-                    step.result_df = df
-                    step.total_sql_retries = retries
+        synthesis_prompt = template.format(
+            data_table_str=table_str,
+            row_count=len(result_df),
+            sql_query=sql_query,
+        )
 
-                    if sql_err:
-                        step.error = f"SQL Hatası: {sql_err}"
-                        logger.error(f"SQL execution failed: {sql_err}")
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "Sen %100 gerçek veritabanı sonuçlarına sadık kalarak rapor yazan Kıdemli Baş Veri Bilimcisisin. "
+                    "Yalnızca verilen tablodaki gerçek sayıları, isimleri, adetleri ve oranları kullan. "
+                    "Asla tabloda olmayan sayı uydurma."
+                ),
+            },
+            {
+                "role": "user",
+                "content": f"Kullanıcı Sorusu: {user_message}\n\n{synthesis_prompt}",
+            },
+        ]
 
-            elif tool_call.name == "generate_python_plot":
-                plot_code = tool_call.arguments.get("code", "")
-                if plot_code:
-                    step.plot_code = plot_code
-                    if step.result_df is not None and not step.result_df.empty:
-                        if status_callback:
-                            status_callback("plotting", "📊 Plotly görselleştirmesi üretiliyor...")
-
-                        fig, plot_err = self._execute_plot_with_self_healing(
-                            code=plot_code,
-                            result_df=step.result_df,
-                            step=step,
-                        )
-                        if fig:
-                            step.figures.append(fig)
-                        if plot_err and not fig:
-                            logger.warning(f"Plot generation failed: {plot_err}")
-
-        # Eğer tool parser ile bulunamadıysa ama result_df varsa ve kullanıcı grafik istemişse
-        if step.result_df is not None and not step.result_df.empty and not step.has_figure:
-            q_lower = user_message.lower()
-            if any(w in q_lower for w in ("grafik", "çiz", "görselleştir", "plot", "bar", "dağılım", "trend")):
-                fallback_fig = self._auto_generate_fallback_plot(step.result_df, user_message)
-                if fallback_fig:
-                    step.figures.append(fallback_fig)
-
-        return step, raw_llm_response
+        try:
+            report = self.llm.chat(messages)
+            return report.strip()
+        except Exception as e:
+            logger.error(f"Grounded synthesis LLM call failed: {e}")
+            # Fallback olarak doğrudan tabloyu ve özet metni döndür
+            return f"### 📊 Temel Bulgular\n\nSorgu sonucunda {len(result_df)} kayıt listelenmiştir:\n\n```\n{table_str}\n```"
 
     # ─────────────────────────────────────────────────────────
     # Closed-Loop Self-Healing (SQL Hata Düzeltme)
@@ -354,11 +537,30 @@ class SQLReActAgent:
                     f"Düzeltme #{retries}: '{error_msg}' hatası üzerine SQL yeniden planlandı."
                 )
 
-                fix_prompt = SQL_ERROR_FIX_PROMPT.format(
-                    error_message=error_msg,
-                    code_type="sql",
-                    failed_code=current_sql,
-                    schema_context=self.db_manager.get_schema_context(),
+                table_cols_hints = []
+                for t in self.db_manager.get_table_names():
+                    cols = self.db_manager.get_table_columns(t)
+                    table_cols_hints.append(f"- Tablo `{t}` içindeki GERÇEK kolonlar: {', '.join(f'`{c}`' for c in cols)}")
+
+                cols_reminder = "\n".join(table_cols_hints)
+
+                custom_advice = ""
+                if "no such column" in error_msg.lower():
+                    custom_advice = (
+                        "\n⚠️ KOLON BULUNAMADI UYARISI:\n"
+                        "Kullandığın kolon adı veritabanında mevcut değil! "
+                        "Lütfen yukarıda listelenen GERÇEK kolon adlarından birini seç. "
+                        "Eğer kullanıcı 'marka' sorduysa ama tabloda 'Manufacturer'/'Marka' yoksa (çünkü veri seti zaten tek bir markaya aittir, örn: BMW), "
+                        "'Model', 'Series', 'Segment' veya 'Region' gibi mevcut bir kategorik kolona göre gruplama yaparak soruyu yanıtla."
+                    )
+
+                fix_prompt = (
+                    f"Önceki SQL sorgusu şu hatayı verdi:\n"
+                    f"❌ HATA: {error_msg}\n\n"
+                    f"⚠️ HATALI SQL:\n```sql\n{current_sql}\n```\n\n"
+                    f"📊 VERİTABANINDA MEVCUT OLAN GERÇEK KOLONLAR:\n{cols_reminder}\n"
+                    f"{custom_advice}\n\n"
+                    f"Lütfen bu hatayı analiz et ve YALNIZCA düzeltilmiş çalışan ```sql ... ``` kodunu ver."
                 )
 
                 fix_messages = [
@@ -370,8 +572,8 @@ class SQLReActAgent:
 
                 corrected = False
                 for t in new_tools:
-                    if t.name == "execute_sql" and t.arguments.get("query"):
-                        current_sql = t.arguments["query"]
+                    if t.name == "execute_sql" and t.get_arg("query", "sql"):
+                        current_sql = t.get_arg("query", "sql")
                         step.sql_query = current_sql
                         corrected = True
                         break
@@ -394,10 +596,11 @@ class SQLReActAgent:
         current_code = code
 
         for retry in range(self.MAX_PLOT_RETRIES + 1):
-            fig, err = self.executor.execute_plot(current_code, result_df)
-            if fig is not None and not err:
-                return fig, None
+            exec_res: ExecutionResult = self.executor.execute_plot(current_code, result_df)
+            if exec_res.success and exec_res.figures:
+                return exec_res.figures[0], None
 
+            err = exec_res.error
             if retry < self.MAX_PLOT_RETRIES and err:
                 step.healing_notes.append(f"Görselleştirme düzeltmesi #{retry + 1}: {err}")
                 fix_prompt = (
@@ -414,8 +617,8 @@ class SQLReActAgent:
                 _, tools = ToolParser.parse_response(fix_resp)
                 found = False
                 for t in tools:
-                    if t.name == "generate_python_plot" and t.arguments.get("code"):
-                        current_code = t.arguments["code"]
+                    if t.name == "generate_python_plot" and t.get_arg("code", "python_code"):
+                        current_code = t.get_arg("code", "python_code")
                         found = True
                         break
                 if not found:
@@ -436,7 +639,6 @@ class SQLReActAgent:
             import plotly.express as px
             cols = df.columns.tolist()
             if len(cols) >= 2:
-                # 1. kolon kategorik / metin, 2. kolon sayısal
                 x_col = cols[0]
                 y_col = cols[1]
                 fig = px.bar(

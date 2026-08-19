@@ -3,8 +3,9 @@ Tool Calling Specifications & Parsers — ReAct döngüsü için araç tanımlar
 
 Desteklenen Araçlar:
 1. execute_sql: Veritabanında SQL sorgusu çalıştırıp result_df döndürür.
-2. generate_python_plot: result_df üzerinde Plotly görselleştirmesi (fig) üretir.
-3. get_table_schema: Belirli bir tablonun şemasını detaylı inceler.
+2. inspect_csv_data: Belirli bir kolonun frekans dağılımını veya tekil değerlerini inceler.
+3. read_csv_sample: CSV/SQLite tablosundan doğrudan örnek satırları okur.
+4. generate_python_plot: result_df üzerinde Plotly görselleştirmesi (fig) üretir.
 """
 
 import json
@@ -20,6 +21,13 @@ class ToolCall:
     arguments: Dict[str, Any]
     raw_text: Optional[str] = None
     call_id: Optional[str] = None
+
+    def get_arg(self, *keys: str, default: Any = "") -> Any:
+        """Birden çok olası anahtar adından ilk bulunanı döndür."""
+        for k in keys:
+            if k in self.arguments and self.arguments[k]:
+                return self.arguments[k]
+        return default
 
 
 # ─────────────────────────────────────────────────────────
@@ -45,6 +53,33 @@ TOOLS_SCHEMA = [
                     }
                 },
                 "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "inspect_csv_data",
+            "description": (
+                "CSV / SQLite tablosundaki bir kolonun değer dağılımını (frekans / value_counts) ve yüzdelerini hesaplar."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "table_name": {
+                        "type": "string",
+                        "description": "Hedef tablo adı.",
+                    },
+                    "column_name": {
+                        "type": "string",
+                        "description": "İncelenecek kolon adı (örn: 'Marka', 'Kategori', 'Sehir').",
+                    },
+                    "top_n": {
+                        "type": "integer",
+                        "description": "Kaç adet en sık geçen değer getirilsin (varsayılan: 10).",
+                    },
+                },
+                "required": ["table_name", "column_name"],
             },
         },
     },
@@ -97,7 +132,6 @@ class ToolParser:
         tool_calls: List[ToolCall] = []
 
         # ── 1) JSON Tag / Block Parsing ──
-        # ```json { "action": "execute_sql", ... } ```
         json_pattern = r"```(?:json)?\s*(\{\s*\"(?:tool|action|name)\"[\s\S]*?\})\s*```"
         json_matches = list(re.finditer(json_pattern, text, re.DOTALL | re.IGNORECASE))
 
@@ -107,53 +141,73 @@ class ToolParser:
                 tool_name = data.get("tool") or data.get("action") or data.get("name")
                 args = data.get("arguments") or data.get("action_input") or data.get("parameters") or {}
                 if isinstance(args, str):
-                    # Bazı modeller string olarak SQL geçebilir: "action_input": "SELECT ..."
                     if tool_name == "execute_sql":
-                        args = {"query": args}
+                        args = {"query": args, "sql": args}
                     elif tool_name == "generate_python_plot":
-                        args = {"python_code": args}
-                if tool_name in ("execute_sql", "generate_python_plot"):
+                        args = {"python_code": args, "code": args}
+                elif isinstance(args, dict):
+                    # Anahtar eşitlemesi
+                    if "query" in args:
+                        args["sql"] = args["query"]
+                    if "sql" in args:
+                        args["query"] = args["sql"]
+                    if "python_code" in args:
+                        args["code"] = args["python_code"]
+                    if "code" in args:
+                        args["python_code"] = args["code"]
+
+                if tool_name in ("execute_sql", "generate_python_plot", "inspect_csv_data", "read_csv_sample"):
                     tool_calls.append(ToolCall(name=tool_name, arguments=args, raw_text=match.group(0)))
             except Exception:
                 pass
 
         # ── 2) Standart Markdown Kod Blokları (Doğrudan SQL ve Python) ──
-        # Eğer JSON bulunamadıysa veya ek olarak doğrudan SQL ve Python blokları yazılmışsa:
         if not tool_calls:
-            # SQL Blokları: ```sql SELECT ... ```
-            sql_pattern = r"```sql\s*\n([\s\S]*?)```"
+            # SQL Blokları: ```sql SELECT ... ``` veya ```sqlite ... ``` veya ``` SELECT ... ```
+            sql_pattern = r"```(?:sql|sqlite)?\s*([\s\S]*?)```"
             for match in re.finditer(sql_pattern, text, re.IGNORECASE):
-                query = match.group(1).strip()
-                if query.upper().startswith(("SELECT", "WITH")):
+                block_content = match.group(1).strip()
+                if block_content.upper().startswith(("SELECT", "WITH", "EXPLAIN")):
                     tool_calls.append(
                         ToolCall(
                             name="execute_sql",
-                            arguments={"query": query},
+                            arguments={"query": block_content, "sql": block_content},
                             raw_text=match.group(0),
                         )
                     )
 
-            # Python Plot Blokları: ```python fig = ... ```
-            py_pattern = r"```(?:python|py)\s*\n([\s\S]*?)```"
+            # Python Plot Blokları: ```python fig = ... ``` veya ```py ... ```
+            py_pattern = r"```(?:python|py)?\s*([\s\S]*?)```"
             for match in re.finditer(py_pattern, text, re.IGNORECASE):
                 code = match.group(1).strip()
-                # Eğer grafik kodu ise
                 if any(kw in code for kw in ("px.", "go.", "fig =", "fig.")):
                     tool_calls.append(
                         ToolCall(
                             name="generate_python_plot",
-                            arguments={"python_code": code},
+                            arguments={"python_code": code, "code": code},
                             raw_text=match.group(0),
                         )
                     )
 
-        # ── 3) Açıklama Metnini Temizleme ──
+        # ── 3) Çerçevesiz (Bare) SQL Sorguları (Son Çare) ──
+        if not tool_calls:
+            bare_sql_match = re.search(r"(?:^|\n)\s*((?:SELECT|WITH)\b[\s\S]+?;)", text, re.IGNORECASE)
+            if bare_sql_match:
+                bare_query = bare_sql_match.group(1).strip()
+                tool_calls.append(
+                    ToolCall(
+                        name="execute_sql",
+                        arguments={"query": bare_query, "sql": bare_query},
+                        raw_text=bare_query,
+                    )
+                )
+
+        # ── 4) Açıklama Metnini Temizleme ──
         clean_text = text
         for tc in tool_calls:
             if tc.raw_text:
                 clean_text = clean_text.replace(tc.raw_text, "")
 
-        # Kalan fazla boşluk ve blokları düzenle
         clean_text = re.sub(r"\n{3,}", "\n\n", clean_text).strip()
 
         return clean_text, tool_calls

@@ -2,24 +2,25 @@
 Data Loader — Akıllı encoding ve separator algılama ile CSV/Excel yükleme.
 
 Desteklenen formatlar:
-- CSV (.csv) — Otomatik encoding (UTF-8, cp1254, Latin-1, ...) ve separator algılama
+- CSV (.csv) — Otomatik encoding (UTF-8, UTF-8-BOM, CP1254, ISO-8859-9, Latin-1, CP1252) ve separator algılama
 - Excel (.xlsx, .xls) — Birden fazla sheet desteği
 
 Türkçe dosyalar için yaygın encoding'leri (cp1254, iso-8859-9) otomatik algılar.
-Kolon tiplerini (tarih, sayı, kategori) otomatik dönüştürür.
+Kolon tiplerini (tarih, sayı, kategori) veri kaybı veya sayı bozulması olmadan akıllıca dönüştürür.
 """
 
+import csv
 import io
-import pandas as pd
+import re
+from typing import Optional, Tuple
 import chardet
-from typing import Tuple, Optional
+import pandas as pd
 
 
 class CSVLoader:
     """CSV ve Excel dosyalarını akıllıca yükler — encoding, separator ve tip algılama."""
 
-    # Türkçe dosyalar için yaygın encoding'ler
-    ENCODINGS = ["utf-8", "utf-8-sig", "latin-1", "cp1254", "iso-8859-9", "cp1252"]
+    ENCODINGS = ["utf-8-sig", "utf-8", "cp1254", "iso-8859-9", "latin-1", "cp1252"]
     SEPARATORS = [",", ";", "\t", "|"]
 
     @classmethod
@@ -70,19 +71,31 @@ class CSVLoader:
         # Separator algıla
         separator = cls._detect_separator(text)
 
-        # DataFrame oluştur
-        df = pd.read_csv(
-            io.StringIO(text),
-            sep=separator,
-            on_bad_lines="skip",
-            engine="python",
-        )
+        # DataFrame oluştur - önce c motoru sonra python motoru dene
+        try:
+            df = pd.read_csv(
+                io.StringIO(text),
+                sep=separator,
+                on_bad_lines="skip",
+                engine="c",
+            )
+        except Exception:
+            df = pd.read_csv(
+                io.StringIO(text),
+                sep=separator,
+                on_bad_lines="skip",
+                engine="python",
+            )
 
-        # Boş kolon isimlerini düzelt
-        df.columns = [
-            f"Kolon_{i}" if str(col).strip() == "" else str(col).strip()
-            for i, col in enumerate(df.columns)
-        ]
+        # Boş kolon isimlerini düzelt ve temizle
+        clean_cols = []
+        for i, col in enumerate(df.columns):
+            c_str = str(col).strip()
+            if not c_str or c_str.startswith("Unnamed"):
+                clean_cols.append(f"Kolon_{i+1}")
+            else:
+                clean_cols.append(c_str)
+        df.columns = clean_cols
 
         # Otomatik tip dönüşümü
         df = cls._auto_convert_types(df)
@@ -126,11 +139,14 @@ class CSVLoader:
             raise ValueError(f"Excel dosyası okunamadı: {e}")
 
         # Boş kolon isimlerini düzelt
-        df.columns = [
-            f"Kolon_{i}" if str(col).strip() == "" or str(col).startswith("Unnamed")
-            else str(col).strip()
-            for i, col in enumerate(df.columns)
-        ]
+        clean_cols = []
+        for i, col in enumerate(df.columns):
+            c_str = str(col).strip()
+            if not c_str or c_str.startswith("Unnamed"):
+                clean_cols.append(f"Kolon_{i+1}")
+            else:
+                clean_cols.append(c_str)
+        df.columns = clean_cols
 
         # Otomatik tip dönüşümü
         df = cls._auto_convert_types(df)
@@ -158,90 +174,136 @@ class CSVLoader:
 
     @classmethod
     def _detect_encoding(cls, raw_bytes: bytes) -> str:
-        """Dosyanın encoding'ini otomatik algıla."""
-        # chardet ile otomatik algılama (ilk 10KB yeterli)
-        result = chardet.detect(raw_bytes[:10000])
+        """Dosyanın encoding'ini otomatik ve güvenli algıla (Türkçe karakter koruması)."""
+        sample = raw_bytes[:65536]
 
-        if result["confidence"] > 0.7 and result["encoding"]:
+        # 1) UTF-8 / UTF-8-SIG strict kontrolü
+        try:
+            sample.decode("utf-8")
+            return "utf-8"
+        except UnicodeDecodeError:
+            pass
+
+        # 2) chardet algılama
+        result = chardet.detect(sample)
+        if result.get("confidence", 0) > 0.75 and result.get("encoding"):
             detected = result["encoding"].lower()
-
-            # Yaygın mapping düzeltmeleri
             encoding_map = {
                 "ascii": "utf-8",
                 "windows-1254": "cp1254",
                 "iso-8859-9": "cp1254",
                 "windows-1252": "cp1252",
             }
-            return encoding_map.get(detected, detected)
-
-        # Düşük güven → sırayla dene
-        for enc in cls.ENCODINGS:
+            cand = encoding_map.get(detected, detected)
             try:
-                raw_bytes.decode(enc)
+                sample.decode(cand)
+                return cand
+            except Exception:
+                pass
+
+        # 3) Sırayla Türkçe ve Batı Avrupa encoding'lerini dene
+        for enc in ["cp1254", "iso-8859-9", "latin-1", "cp1252", "utf-8-sig"]:
+            try:
+                sample.decode(enc)
                 return enc
             except (UnicodeDecodeError, LookupError):
                 continue
 
-        return "utf-8"  # Son çare
+        return "utf-8"
 
     @classmethod
     def _detect_separator(cls, text: str) -> str:
         """CSV separator'ını otomatik algıla."""
-        first_lines = text.split("\n")[:10]
-        header = first_lines[0] if first_lines else ""
+        # İlk 10 dolu satırı al
+        lines = [line for line in text.splitlines() if line.strip()][:10]
+        if not lines:
+            return ","
 
+        sample_text = "\n".join(lines)
+
+        # 1) csv.Sniffer ile dene
+        try:
+            sniffer = csv.Sniffer()
+            dialect = sniffer.sniff(sample_text, delimiters=",;\t|")
+            if dialect and dialect.delimiter in cls.SEPARATORS:
+                return dialect.delimiter
+        except Exception:
+            pass
+
+        # 2) Fallback frekans ve satır tutarlılığı analizi
+        header = lines[0]
         scores = {}
         for sep in cls.SEPARATORS:
-            count = header.count(sep)
-            if count > 0:
-                # Tutarlılık: ilk satırlarda aynı sayıda mı?
-                consistent = all(
-                    line.count(sep) == count
-                    for line in first_lines[1:5]
-                    if line.strip()
-                )
-                scores[sep] = count if consistent else count * 0.5
+            header_count = header.count(sep)
+            if header_count > 0:
+                # Satırlar arası tutarlılık
+                consistent = all(line.count(sep) == header_count for line in lines[1:5])
+                scores[sep] = header_count * (2.0 if consistent else 1.0)
 
         if scores:
             return max(scores, key=scores.get)
-        return ","  # Varsayılan
+
+        return ","
 
     @classmethod
     def _auto_convert_types(cls, df: pd.DataFrame) -> pd.DataFrame:
-        """Kolon tiplerini akıllıca dönüştür (tarih, sayı, kategori)."""
+        """
+        Kolon tiplerini veri kaybı veya sayı bozulması olmadan dönüştür.
+        - Sayısal kolonlar (örn: "4500.00", "15", "-3.5"): float/int
+        - Türkçe formatlı sayılar ("1.234,56"): kontrollü float
+        - Tarih formatları: datetime
+        - Model veya alfanümerik metinler ("1.4 TSI", "320d"): METİN olarak korunur.
+        """
         for col in df.columns:
             if df[col].dtype != "object":
                 continue
 
-            # 1) Tarih dönüşümü
+            non_null = df[col].dropna().astype(str).str.strip()
+            if len(non_null) == 0:
+                continue
+
+            # 1) Standart Sayısal Dönüşüm (Örn: "4500.00", "1250", "-3.14")
             try:
-                converted = pd.to_datetime(df[col], infer_datetime_format=True)
-                # En az %50'si valid tarih mi?
-                if converted.notna().sum() > len(df) * 0.5:
-                    df[col] = converted
+                numeric = pd.to_numeric(df[col], errors="coerce")
+                if numeric.notna().sum() >= len(non_null) * 0.9:
+                    df[col] = numeric
                     continue
-            except (ValueError, TypeError):
+            except Exception:
                 pass
 
-            # 2) Sayısal dönüşüm (Türkçe virgüllü ondalık: "1.234,56" → 1234.56)
+            # 2) Türkçe / Avrupa Formatlı Sayılar (Örn: "1.234,56" veya "1234,56")
             try:
-                if df[col].str.contains(r"^\s*-?\d", na=False).mean() > 0.5:
+                turkish_num_pattern = r"^\s*-?\d{1,3}(?:\.\d{3})*,\d+\s*$"
+                is_turkish_numeric = non_null.str.match(turkish_num_pattern).mean() >= 0.8
+                if is_turkish_numeric:
                     cleaned = (
                         df[col]
+                        .astype(str)
                         .str.replace(".", "", regex=False)
                         .str.replace(",", ".", regex=False)
                     )
                     numeric = pd.to_numeric(cleaned, errors="coerce")
-                    # En az %80'i valid sayı mı?
-                    if numeric.notna().sum() > len(df) * 0.8:
+                    if numeric.notna().sum() >= len(non_null) * 0.8:
                         df[col] = numeric
                         continue
-            except (ValueError, TypeError, AttributeError):
+            except Exception:
                 pass
 
-            # 3) Kategorik dönüşüm (az benzersiz değer varsa)
-            unique_ratio = df[col].nunique() / max(len(df), 1)
-            if unique_ratio < 0.05 and df[col].nunique() < 50:
+            # 3) Tarih Dönüşümü
+            try:
+                date_like_sample = non_null.head(20)
+                has_date_delimiters = date_like_sample.str.contains(r"[\-/\.]\d{2,4}", regex=True).mean() > 0.8
+                if has_date_delimiters:
+                    converted = pd.to_datetime(df[col], format="mixed", errors="coerce")
+                    if converted.notna().sum() >= len(non_null) * 0.8:
+                        df[col] = converted
+                        continue
+            except Exception:
+                pass
+
+            # 4) Kategorik Dönüşüm
+            unique_count = df[col].nunique()
+            if unique_count <= 30 and (unique_count / max(len(df), 1)) < 0.05:
                 df[col] = df[col].astype("category")
 
         return df
