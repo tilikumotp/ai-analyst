@@ -794,9 +794,18 @@ else:
             executed_code = msg.get("executed_code") or sql_query
             code_type = msg.get("code_type", "python" if not sql_query else "sql")
             res_df = msg.get("result_df")
+            lineage_mermaid = msg.get("lineage_mermaid")
+            critic_notes = msg.get("critic_notes", [])
+            is_cached = msg.get("is_cached", False)
 
-            if applied_metrics or executed_code or (res_df is not None and not res_df.empty):
-                with st.expander("🔍 Teknik Detayları ve Çalıştırılan Kodu Göster", expanded=False):
+            if is_cached:
+                st.caption("⚡ **Anlamsal Önbellekten Getirildi (0 Token / <50ms)**")
+
+            if applied_metrics or executed_code or (res_df is not None and not res_df.empty) or lineage_mermaid:
+                with st.expander("🔍 Teknik Detayları, Kod ve Veri Soyağacını (XAI) Göster", expanded=False):
+                    if is_cached:
+                        st.info("⚡ Bu analiz daha önce sorulan benzer bir soruyla anlamsal olarak eşleşti ve önbellekten sıfır gecikmeyle yüklendi.")
+
                     if applied_metrics:
                         st.markdown("##### 🛡️ Uygulanan Şirket İş Kuralları (Data Governance)")
                         for m in applied_metrics:
@@ -819,6 +828,16 @@ else:
                         else:
                             st.markdown("##### 💾 Çalıştırılan SQL Sorgusu")
                             st.code(executed_code, language="sql")
+
+                    if critic_notes:
+                        st.markdown("##### 🧐 Multi-Agent Eleştirmen Notları (Critic Feedback)")
+                        for cn in critic_notes:
+                            st.caption(f"• {cn}")
+
+                    if lineage_mermaid:
+                        st.markdown("##### 🌲 Veri Soyağacı & Dönüşüm Akışı (Data Lineage / XAI)")
+                        st.caption("Verinin ham kaynaktan nihai sayıya kadar geçirdiği dönüşüm aşamaları:")
+                        st.code(lineage_mermaid, language="mermaid")
 
                     if res_df is not None and not res_df.empty:
                         st.markdown(f"##### 📊 Sonuç Tablosu ({len(res_df):,} kayıt)")
@@ -861,7 +880,7 @@ else:
                 st.session_state.messages.append({"role": "assistant", "content": error_msg})
 
             else:
-                with st.status("🧠 ReAct & Veri Analiz Katmanı çalışıyor...", expanded=True) as status_box:
+                with st.status("🧠 ReAct, Multi-Agent & XAI Katmanı çalışıyor...", expanded=True) as status_box:
                     status_container = st.empty()
 
                     def update_status(step_type: str, text: str):
@@ -899,10 +918,13 @@ else:
                     for fig in step_result.figures:
                         st.plotly_chart(fig, width="stretch")
 
-                # Teknik Detaylar, Kod ve Yönetişim
+                # Teknik Detaylar, Kod, Veri Soyağacı ve Yönetişim
                 has_code = bool(step_result.executed_code or step_result.sql_query)
-                if step_result.has_applied_metrics or has_code or step_result.has_table:
-                    with st.expander("🔍 Teknik Detayları ve Çalıştırılan Kodu Göster", expanded=False):
+                if step_result.has_applied_metrics or has_code or step_result.has_table or step_result.lineage_mermaid:
+                    with st.expander("🔍 Teknik Detayları, Kod ve Veri Soyağacını (XAI) Göster", expanded=False):
+                        if step_result.is_cached:
+                            st.info("⚡ Bu analiz daha önce sorulan benzer bir soruyla anlamsal olarak eşleşti ve önbellekten sıfır gecikmeyle yüklendi.")
+
                         if step_result.has_applied_metrics:
                             st.markdown("##### 🛡️ Uygulanan Şirket İş Kuralları (Data Governance)")
                             for m in step_result.applied_metrics:
@@ -918,6 +940,16 @@ else:
                             else:
                                 st.markdown("##### 💾 Çalıştırılan SQL Sorgusu")
                                 st.code(step_result.executed_code or step_result.sql_query, language="sql")
+
+                        if step_result.critic_notes:
+                            st.markdown("##### 🧐 Multi-Agent Eleştirmen Notları (Critic Feedback)")
+                            for cn in step_result.critic_notes:
+                                st.caption(f"• {cn}")
+
+                        if step_result.lineage_mermaid:
+                            st.markdown("##### 🌲 Veri Soyağacı & Dönüşüm Akışı (Data Lineage / XAI)")
+                            st.caption("Verinin ham kaynaktan nihai sayıya kadar geçirdiği dönüşüm aşamaları:")
+                            st.code(step_result.lineage_mermaid, language="mermaid")
 
                         if step_result.has_table:
                             st.markdown(f"##### 📊 Sonuç Tablosu ({len(step_result.result_df):,} kayıt)")

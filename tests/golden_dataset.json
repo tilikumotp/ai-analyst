@@ -1,0 +1,57 @@
+[
+  {
+    "id": "AUTO_01",
+    "domain": "Automotive",
+    "question": "En çok satan ilk 3 araba modelini ve toplam satış adetlerini listele",
+    "expected_groupby": "Model",
+    "expected_metric": "Units_Sold",
+    "expected_limit": 3,
+    "difficulty": "easy"
+  },
+  {
+    "id": "AUTO_02",
+    "domain": "Automotive",
+    "question": "Bölgelere göre toplam satış adetlerini ve pazar paylarını göster",
+    "expected_groupby": "Region",
+    "expected_metric": "Units_Sold",
+    "difficulty": "medium"
+  },
+  {
+    "id": "AUTO_03",
+    "domain": "Automotive",
+    "question": "2022 yılından sonraki satışların modeller bazında dağılımı nedir?",
+    "expected_filter": "Year > 2022",
+    "expected_groupby": "Model",
+    "difficulty": "medium"
+  },
+  {
+    "id": "RETAIL_01",
+    "domain": "Retail & E-commerce",
+    "question": "Kategori bazında toplam ciro ve ortalama birim fiyatları hesapla",
+    "expected_groupby": "Kategori",
+    "expected_metric": "Toplam_Gelir",
+    "difficulty": "easy"
+  },
+  {
+    "id": "RETAIL_02",
+    "domain": "Retail & E-commerce",
+    "question": "En yüksek satış miktarına sahip ilk 5 şehri ve gelirlerini göster",
+    "expected_groupby": "Şehir",
+    "expected_limit": 5,
+    "difficulty": "medium"
+  },
+  {
+    "id": "FINANCE_01",
+    "domain": "Finance",
+    "question": "Aylık satış trendini ve aydan aya değişim oranını göster",
+    "expected_groupby": "Tarih",
+    "difficulty": "hard"
+  },
+  {
+    "id": "FINANCE_02",
+    "domain": "Finance",
+    "question": "Fiyatı 1.000 TL üzerinde olan ve satış adedi 2'den fazla olan işlemleri filtrele",
+    "expected_filter": "Birim_Fiyat > 1000",
+    "difficulty": "medium"
+  }
+]

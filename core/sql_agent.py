@@ -26,6 +26,10 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import pandas as pd
 import plotly.graph_objects as go
 
+from core.critic_agent import CodeCriticAgent
+from core.lineage import DataLineageTracker, LineageStep
+from core.schema_linker import SchemaLinker
+from core.semantic_cache import SemanticCache
 from core.knowledge_base import (
     BusinessMetric,
     GuardrailEngine,
@@ -131,6 +135,10 @@ class AgentStepResult:
     healing_notes: List[str] = field(default_factory=list)
     applied_metrics: List[BusinessMetric] = field(default_factory=list)
     guardrail_warnings: List[str] = field(default_factory=list)
+    critic_notes: List[str] = field(default_factory=list)
+    lineage_mermaid: Optional[str] = None
+    lineage_steps: List[LineageStep] = field(default_factory=list)
+    is_cached: bool = False
     total_sql_retries: int = 0
     detected_intent: str = "🎯 Kıdemli Veri Analisti"
 
@@ -152,7 +160,7 @@ class AgentStepResult:
 
 
 class SQLReActAgent:
-    """CSV/Pandas ve SQL Veritabanı Modlu, Semantik Katman ve 2 Aşamalı Sıfır-Halüsinasyon Analist Ajanı."""
+    """Multi-Agent Eleştiri, Dinamik Şema Eşleme, Anlamsal Önbellek ve Veri Soyağacı Destekli İleri Seviye Analist Ajanı."""
 
     MAX_SQL_RETRIES = 3
     MAX_PLOT_RETRIES = 2
@@ -169,9 +177,11 @@ class SQLReActAgent:
         self.guardrail_engine = GuardrailEngine()
         self.llm = LLMClient()
         self.executor = SafeExecutor(timeout=60)
+        self.semantic_cache = SemanticCache(default_threshold=0.90)
+        self.critic_agent = CodeCriticAgent(self.llm)
 
     # ─────────────────────────────────────────────────────────
-    # Aşama 1: Planlama Mesajları (Planning Prompt)
+    # Aşama 1: Planlama Mesajları (Planning Prompt & Schema Linking)
     # ─────────────────────────────────────────────────────────
     def build_planning_messages(
         self,
@@ -182,8 +192,8 @@ class SQLReActAgent:
         active_key: Optional[str] = None,
         mode: str = "python",
     ) -> Tuple[List[Dict[str, str]], str, AnalyticsIntent]:
-        """Aşama 1 için niyet ve dosya tipine göre planlama mesajlarını derler."""
-        from core.prompts import CSV_PANDAS_PLANNING_PROMPT, build_dataframe_context
+        """Aşama 1 için niyet, dosya tipi ve dinamik şema bağlama (Schema Linking) ile planlama mesajlarını derler."""
+        from core.prompts import CSV_PANDAS_PLANNING_PROMPT
 
         intent, persona_label = IntentRouter.route(user_message)
 
@@ -191,7 +201,8 @@ class SQLReActAgent:
             active_df = datasets[active_key]["df"]
             meta = datasets[active_key].get("metadata", {})
             file_name = meta.get("dosya_adi", active_key)
-            df_ctx = build_dataframe_context(active_df, file_name)
+            # Dinamik Şema Eşleme (Schema Linking): Sadece soruyla alakalı kolonları seç
+            df_ctx = SchemaLinker.build_focused_dataframe_context(active_df, user_message, file_name, top_k=10)
             system_prompt = CSV_PANDAS_PLANNING_PROMPT.format(dataframe_context=df_ctx)
         else:
             schema_context = self.db_manager.get_schema_context()
@@ -229,7 +240,7 @@ class SQLReActAgent:
         return messages, persona_label, intent
 
     # ─────────────────────────────────────────────────────────
-    # 2 Aşamalı ReAct Döngüsü (CSV Pandas / SQL Dual Mode)
+    # 2 Aşamalı ReAct Döngüsü (Multi-Agent, Cache & Lineage)
     # ─────────────────────────────────────────────────────────
     def execute_react_cycle(
         self,
@@ -240,42 +251,71 @@ class SQLReActAgent:
         status_callback: Optional[Callable[[str, str], None]] = None,
     ) -> Tuple[AgentStepResult, str]:
         """
-        ReAct Döngüsü:
-        - CSV/Excel dosyası yüklendiğinde doğrudan Python / Pandas komutları çalıştırır.
-        - SQL veritabanı bağlandığında SQL sorguları çalıştırır.
+        Gelişmiş ReAct Döngüsü:
+        1. Anlamsal Önbellek (Semantic Cache) Kontrolü
+        2. Niyet Yönlendirme & Semantik Katman
+        3. Generator & Schema Linking
+        4. Multi-Agent Critic & Refiner İncelemesi
+        5. Deterministik Yürütme & Self-Healing
+        6. Grounded Synthesis & Data Lineage XAI
+        7. Önbelleğe Kayıt
         """
         step = AgentStepResult()
+
+        # Aktif DataFrame ve dosya bilgisi
+        active_df = pd.DataFrame()
+        file_name = active_key or "data.csv"
+        input_rows = 0
 
         # Dosya tipine göre çalışma modunu belirle (CSV/Excel -> python, SQL -> sql)
         mode = "python"
         if datasets and active_key and active_key in datasets:
+            active_df = datasets[active_key]["df"]
+            input_rows = len(active_df)
             meta = datasets[active_key].get("metadata", {})
+            file_name = meta.get("dosya_adi", active_key)
             file_type = meta.get("dosya_tipi", "").upper()
             if file_type in ("SQL", "SQLITE", "DATABASE"):
                 mode = "sql"
             else:
                 mode = "python"
         elif self.db_manager.get_table_names():
-            # Eğer doğrudan veritabanı tabloları varsa
             mode = "sql"
 
         step.code_type = mode
 
-        # ── 1. Dinamik Niyet Yönlendirme (Intent Routing) ──
+        # ── 1. Anlamsal Önbellek (Semantic Caching) Denetimi ──
+        dataset_hash = SemanticCache.compute_dataset_hash(active_df, file_name)
+        cached_entry = self.semantic_cache.get(user_message, dataset_hash)
+
+        if cached_entry:
+            if status_callback:
+                status_callback("cache", "⚡ Sonuç Anlamsal Önbellekten (Semantic Cache) anında yüklendi! (0 ms)")
+            step.explanation = cached_entry.grounded_report
+            step.result_df = cached_entry.result_df
+            step.figures = cached_entry.figures
+            step.executed_code = cached_entry.executed_code
+            step.code_type = cached_entry.code_type
+            step.lineage_mermaid = cached_entry.lineage_mermaid
+            step.is_cached = True
+            step.detected_intent = "⚡ Anlamsal Önbellek"
+            return step, step.explanation
+
+        # ── 2. Dinamik Niyet Yönlendirme (Intent Routing) ──
         intent, persona_label = IntentRouter.route(user_message)
         step.detected_intent = persona_label
 
         if status_callback:
             status_callback("intent", f"{persona_label} devreye girdi...")
 
-        # ── 2. Semantik Katman: Akıllı Kural Çağırma (Retrieval Engine) ──
+        # ── 3. Semantik Katman: Akıllı Kural Çağırma (Retrieval Engine) ──
         if status_callback:
             status_callback("retrieval", "📚 Şirket iş kuralları ve semantik sözlük taranıyor...")
 
         relevant_metrics = self.retrieval_engine.retrieve(user_message, top_k=2)
         step.applied_metrics = relevant_metrics
 
-        # ── 3. Pre-Flight Guardrail Denetimi ──
+        # ── 4. Pre-Flight Guardrail Denetimi ──
         is_blocked, block_msg = self.guardrail_engine.pre_flight_check(user_message, relevant_metrics)
         if is_blocked and block_msg:
             step.explanation = block_msg
@@ -286,9 +326,9 @@ class SQLReActAgent:
 
         if status_callback:
             mode_desc = "Python / Pandas" if mode == "python" else "SQL"
-            status_callback("reasoning", f"🧠 {persona_label} {mode_desc} analizini planlıyor...")
+            status_callback("reasoning", f"🧠 {persona_label} {mode_desc} analizini planlıyor (Schema Linking aktif)...")
 
-        # ── 4. Aşama 1: Planlama ve Kod Üretimi ──
+        # ── 5. Aşama 1: Generator ile Kod Üretimi ──
         messages, _, current_intent = self.build_planning_messages(
             user_message=user_message,
             chat_history=chat_history,
@@ -299,20 +339,34 @@ class SQLReActAgent:
         )
         raw_planning_response = self.llm.chat(messages)
 
-        # ── 5. Kod Çalıştırma (Act) ──
+        # ── 6. Multi-Agent Critic & Refiner İncelemesi ──
+        available_cols = list(active_df.columns) if not active_df.empty else self.db_manager.get_table_columns(self.db_manager.get_table_names()[0]) if self.db_manager.get_table_names() else []
+        schema_ctx = self.db_manager.get_schema_context() if mode == "sql" else str(available_cols)
+
         if mode == "python" and datasets and active_key:
-            # CSV / Pandas Modu: Python kod bloğunu çıkar ve sandbox'ta çalıştır
             py_blocks = re.findall(r"```(?:python|py)?\s*([\s\S]*?)```", raw_planning_response, re.IGNORECASE)
-            code_to_run = py_blocks[0].strip() if py_blocks else ""
+            code_to_run = py_blocks[0].strip() if py_blocks else raw_planning_response.strip()
 
-            if not code_to_run:
-                # Bare code fallback
-                if "result_df" in raw_planning_response or "df." in raw_planning_response:
-                    code_to_run = raw_planning_response.strip()
+            # Critic Denetimi
+            if status_callback:
+                status_callback("critic", "🧐 Eleştirmen Ajan (Critic) kodu ve şemayı denetliyor...")
 
+            verdict = self.critic_agent.evaluate_and_refine(
+                user_message=user_message,
+                generated_code=code_to_run,
+                code_type="python",
+                schema_context=schema_ctx,
+                available_columns=available_cols,
+            )
+            step.critic_notes = verdict.critique_notes
+            if verdict.refined_code and verdict.refined_code != code_to_run:
+                code_to_run = verdict.refined_code
+                step.healing_notes.append("Multi-Agent Critic: Kod çalıştırma öncesi otonom olarak iyileştirildi.")
+
+            # Sandbox Çalıştırma
             if code_to_run:
                 if status_callback:
-                    status_callback("exec", "🐍 Pandas / Python komutu güvenli ortamda çalıştırılıyor...")
+                    status_callback("exec", "🐍 Pandas / Python komutu güvenli sandbox'ta koşturuluyor...")
 
                 exec_res, py_err, retries = self._execute_python_with_self_healing(
                     code=code_to_run,
@@ -332,7 +386,7 @@ class SQLReActAgent:
                     step.error = f"Python Hatası: {py_err}"
 
         else:
-            # SQL Modu: SQL sorgusunu çıkar ve SQLite üzerinde çalıştır
+            # SQL Modu
             planning_thought, tool_calls = ToolParser.parse_response(raw_planning_response)
             sql_query = ""
             for tc in tool_calls:
@@ -341,6 +395,17 @@ class SQLReActAgent:
                     break
 
             if sql_query:
+                # Critic Denetimi
+                verdict = self.critic_agent.evaluate_and_refine(
+                    user_message=user_message,
+                    generated_code=sql_query,
+                    code_type="sql",
+                    schema_context=schema_ctx,
+                    available_columns=available_cols,
+                )
+                if verdict.refined_code:
+                    sql_query = verdict.refined_code
+
                 if status_callback:
                     status_callback("sql_exec", "🔍 SQL SQLite üzerinde çalıştırılıyor...")
 
@@ -358,7 +423,7 @@ class SQLReActAgent:
                 if sql_err:
                     step.error = f"SQL Hatası: {sql_err}"
 
-        # ── 6. Aşama 2: Doğrulanmış Sentez (Grounded Synthesis) ──
+        # ── 7. Aşama 2: Doğrulanmış Sentez (Grounded Synthesis) ──
         if step.result_df is not None and not step.result_df.empty:
             if status_callback:
                 status_callback("synthesis", "✍️ Gerçek veriler inceleniyor ve doğrulanmış yönetici raporu yazılıyor...")
@@ -370,6 +435,30 @@ class SQLReActAgent:
                 intent=current_intent,
             )
             step.explanation = grounded_report
+
+            # ── 8. Veri Soyağacı & Açıklanabilirlik (Data Lineage / XAI) ──
+            output_rows = len(step.result_df)
+            lineage_steps, lineage_mermaid = DataLineageTracker.trace_pipeline(
+                code=step.executed_code or "",
+                code_type=mode,
+                dataset_name=file_name,
+                input_rows=input_rows or 1000,
+                output_rows=output_rows,
+            )
+            step.lineage_steps = lineage_steps
+            step.lineage_mermaid = lineage_mermaid
+
+            # ── 9. Anlamsal Önbelleğe Kaydet ──
+            self.semantic_cache.set(
+                user_query=user_message,
+                dataset_hash=dataset_hash,
+                executed_code=step.executed_code or "",
+                code_type=mode,
+                result_df=step.result_df,
+                grounded_report=grounded_report,
+                figures=step.figures,
+                lineage_mermaid=lineage_mermaid,
+            )
 
         elif step.result_df is not None and step.result_df.empty:
             step.explanation = "🔍 **Sonuç:** Yapılan analizde belirtilen kriterlere uygun herhangi bir kayıt bulunamadı."
@@ -663,3 +752,35 @@ class SQLReActAgent:
     def is_llm_available(self) -> bool:
         """LLM sunucusunun erişilebilirliğini kontrol et."""
         return self.llm.is_available()
+
+    def _execute_react_offline_fallback(
+        self,
+        code: str,
+        exec_res: ExecutionResult,
+        user_message: str,
+        file_name: str,
+        input_rows: int,
+    ) -> AgentStepResult:
+        """Çevrimdışı test ve benchmark için deterministik sonuç üretici."""
+        step = AgentStepResult()
+        step.code_type = "python"
+        step.executed_code = code
+        step.result_df = exec_res.result_df
+        step.figures = exec_res.figures
+        step.stdout = exec_res.stdout
+        step.error = exec_res.error
+
+        if exec_res.result_df is not None and not exec_res.result_df.empty:
+            preview = exec_res.result_df.head(5).to_string(index=False)
+            step.explanation = f"### 📊 Doğrulanmış Sonuç Tablosu\n\n```\n{preview}\n```\n\nAnaliz başarıyla tamamlandı."
+            lineage_steps, lineage_mermaid = DataLineageTracker.trace_pipeline(
+                code=code,
+                code_type="python",
+                dataset_name=file_name,
+                input_rows=input_rows,
+                output_rows=len(exec_res.result_df),
+            )
+            step.lineage_steps = lineage_steps
+            step.lineage_mermaid = lineage_mermaid
+
+        return step

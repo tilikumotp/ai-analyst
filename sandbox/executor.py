@@ -350,7 +350,7 @@ class SafeExecutor:
 
         # ── 4. Çalıştırma Ortamı ──
         # Tek bir globals dict kullan (exec locals sorununu önler)
-        exec_globals = self._build_exec_globals(code, datasets)
+        exec_globals = self._build_exec_globals(code, datasets, active_key)
 
         try:
             # ── 5. Timeout ile Çalıştır (process-based) ──
@@ -375,7 +375,7 @@ class SafeExecutor:
     # ------------------------------------------------------------------
     # Çalıştırma ortamı kurulumu
     # ------------------------------------------------------------------
-    def _build_exec_globals(self, code: str, datasets: dict) -> dict:
+    def _build_exec_globals(self, code: str, datasets: dict, active_key: str = "") -> dict:
         """
         exec() için globals dict oluştur.
 
@@ -387,9 +387,12 @@ class SafeExecutor:
         for key, entry in datasets.items():
             datasets_copy[key] = entry["df"].copy()
 
-        # df → ilk yüklenen dataset (kısayol)
-        first_key = next(iter(datasets)) if datasets else None
-        df_copy = datasets_copy[first_key] if first_key else pd.DataFrame()
+        # df → aktif dataset (veya ilk yüklenen dataset kısayolu)
+        if active_key and active_key in datasets_copy:
+            df_copy = datasets_copy[active_key]
+        else:
+            first_key = next(iter(datasets_copy)) if datasets_copy else None
+            df_copy = datasets_copy[first_key] if first_key else pd.DataFrame()
 
         exec_globals = {
             "__builtins__": self.SAFE_BUILTINS,
