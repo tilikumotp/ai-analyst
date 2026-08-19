@@ -1,0 +1,57 @@
+[
+  {
+    "canonical_name": "Net Ciro",
+    "aliases": ["ciro", "net ciro", "gelir", "kazanç", "revenue", "net revenue", "toplam gelir", "net satis", "para kazandik", "ne kadar kazandik", "satis tutari"],
+    "business_definition": "Şirketin tüm geçerli ve onaylanmış siparişlerinden elde edilen net satış tutarıdır. İadeler ve iptaller hariç tutulur.",
+    "sql_formula": "SUM(satis_tutari) - COALESCE(SUM(iade_tutari), 0)",
+    "mandatory_filters": "siparis_durumu = 'ONAYLANDI'",
+    "required_columns": ["satis_tutari", "iade_tutari", "siparis_durumu"],
+    "version": "1.2",
+    "is_active": true,
+    "owner": "Finans Departmanı"
+  },
+  {
+    "canonical_name": "Brüt Kar",
+    "aliases": ["kar", "brut kar", "gross profit", "net kar", "kazanc", "kar marji", "ne kadar kar ettik"],
+    "business_definition": "Satış tutarından ürün maliyetinin düşülmesiyle hesaplanan brüt kardır.",
+    "sql_formula": "SUM(satis_tutari) - SUM(maliyet)",
+    "mandatory_filters": "siparis_durumu = 'ONAYLANDI'",
+    "required_columns": ["satis_tutari", "maliyet", "siparis_durumu"],
+    "version": "1.1",
+    "is_active": true,
+    "owner": "Finans Departmanı"
+  },
+  {
+    "canonical_name": "Ortalama Sepet Tutarı (AOV)",
+    "aliases": ["aov", "sepet tutari", "ortalama sepet", "sepet ortalamasi", "average order value", "siparis basina ciro", "sepet basina kazanc"],
+    "business_definition": "Onaylanmış sipariş başına düşen ortalama harcama tutarıdır.",
+    "sql_formula": "SUM(satis_tutari) / COUNT(DISTINCT siparis_id)",
+    "mandatory_filters": "siparis_durumu = 'ONAYLANDI'",
+    "required_columns": ["satis_tutari", "siparis_id", "siparis_durumu"],
+    "version": "1.0",
+    "is_active": true,
+    "owner": "Satış ve Büyüme Departmanı"
+  },
+  {
+    "canonical_name": "İade Oranı",
+    "aliases": ["iade", "iade orani", "return rate", "iade yuzdesi", "donus orani", "iptal orani", "iade analizi"],
+    "business_definition": "Toplam siparişler içinde iade edilen siparişlerin yüzdesel oranıdır.",
+    "sql_formula": "ROUND(CAST(COUNT(CASE WHEN iade_edildi = 1 OR siparis_durumu = 'IADE' THEN 1 END) AS FLOAT) / COUNT(*) * 100, 2)",
+    "mandatory_filters": "",
+    "required_columns": ["iade_edildi", "siparis_durumu"],
+    "version": "1.0",
+    "is_active": true,
+    "owner": "Müşteri Deneyimi & Operasyon"
+  },
+  {
+    "canonical_name": "Aktif Müşteri Sayısı",
+    "aliases": ["aktif musteri", "musteri sayisi", "tekil musteri", "active customers", "toplam musteri", "kac kisi alisveris yapti"],
+    "business_definition": "Sistemde en az 1 adet onaylanmış siparişi bulunan tekil müşteri adedidir.",
+    "sql_formula": "COUNT(DISTINCT musteri_id)",
+    "mandatory_filters": "siparis_durumu = 'ONAYLANDI'",
+    "required_columns": ["musteri_id", "siparis_durumu"],
+    "version": "1.0",
+    "is_active": true,
+    "owner": "Pazarlama ve CRM"
+  }
+]

@@ -1,0 +1,31 @@
+Tarih,Ürün,Kategori,Satış_Miktarı,Birim_Fiyat,Toplam_Gelir,Şehir,Bölge
+2024-01-05,Laptop,Elektronik,15,4500.00,67500.00,İstanbul,Marmara
+2024-01-08,Telefon,Elektronik,42,3200.00,134400.00,Ankara,İç Anadolu
+2024-01-12,Kulaklık,Aksesuar,85,250.00,21250.00,İzmir,Ege
+2024-01-15,Tablet,Elektronik,28,2800.00,78400.00,İstanbul,Marmara
+2024-01-18,Klavye,Aksesuar,63,450.00,28350.00,Bursa,Marmara
+2024-01-22,Monitor,Elektronik,18,3500.00,63000.00,Antalya,Akdeniz
+2024-01-25,Mouse,Aksesuar,95,150.00,14250.00,Ankara,İç Anadolu
+2024-01-28,Yazıcı,Elektronik,12,2200.00,26400.00,İzmir,Ege
+2024-02-01,Laptop,Elektronik,22,4500.00,99000.00,İstanbul,Marmara
+2024-02-05,Telefon,Elektronik,55,3200.00,176000.00,Ankara,İç Anadolu
+2024-02-08,Kulaklık,Aksesuar,120,250.00,30000.00,İzmir,Ege
+2024-02-12,Tablet,Elektronik,35,2800.00,98000.00,Bursa,Marmara
+2024-02-15,Klavye,Aksesuar,78,450.00,35100.00,Antalya,Akdeniz
+2024-02-18,Monitor,Elektronik,25,3500.00,87500.00,İstanbul,Marmara
+2024-02-22,Mouse,Aksesuar,110,150.00,16500.00,Ankara,İç Anadolu
+2024-02-25,Yazıcı,Elektronik,8,2200.00,17600.00,Trabzon,Karadeniz
+2024-03-01,Laptop,Elektronik,30,4600.00,138000.00,İstanbul,Marmara
+2024-03-05,Telefon,Elektronik,48,3300.00,158400.00,İzmir,Ege
+2024-03-08,Kulaklık,Aksesuar,92,260.00,23920.00,Ankara,İç Anadolu
+2024-03-12,Tablet,Elektronik,40,2900.00,116000.00,Antalya,Akdeniz
+2024-03-15,Klavye,Aksesuar,55,460.00,25300.00,İstanbul,Marmara
+2024-03-18,Monitor,Elektronik,20,3600.00,72000.00,Bursa,Marmara
+2024-03-22,Mouse,Aksesuar,130,160.00,20800.00,İzmir,Ege
+2024-03-25,Yazıcı,Elektronik,15,2300.00,34500.00,Ankara,İç Anadolu
+2024-04-01,Laptop,Elektronik,,4600.00,,İstanbul,Marmara
+2024-04-05,Telefon,Elektronik,60,3300.00,198000.00,,İç Anadolu
+2024-04-08,Kulaklık,Aksesuar,75,,18750.00,İzmir,Ege
+2024-04-12,Tablet,Elektronik,45,2900.00,130500.00,Ankara,İç Anadolu
+2024-04-15,Klavye,Aksesuar,88,460.00,40480.00,Antalya,Akdeniz
+2024-04-18,Monitor,Elektronik,22,3600.00,79200.00,Trabzon,Karadeniz

@@ -1,0 +1,51 @@
+# ─────────────────────────────────────────────────────────
+# Python & Virtual Environments
+# ─────────────────────────────────────────────────────────
+venv/
+.venv/
+env/
+ENV/
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+
+# ─────────────────────────────────────────────────────────
+# Gizlilik & Çevre Değişkenleri (.env)
+# ─────────────────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+
+# ─────────────────────────────────────────────────────────
+# Kullanıcı Sohbet Geçmişi (Gizlilik Koruması)
+# data/sessions altındaki tüm .json sohbet kayıtları engellenir
+# ─────────────────────────────────────────────────────────
+data/sessions/*.json
+!data/sessions/.gitkeep
+
+# ─────────────────────────────────────────────────────────
+# Veritabanı ve Geçici Dosyalar
+# ─────────────────────────────────────────────────────────
+*.sqlite
+*.sqlite3
+*.db
+*.db-journal
+*.db-wal
+
+# ─────────────────────────────────────────────────────────
+# Editör & IDE Ayarları
+# ─────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# ─────────────────────────────────────────────────────────
+# Streamlit Yerel Ayarları
+# ─────────────────────────────────────────────────────────
+.streamlit/secrets.toml

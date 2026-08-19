@@ -1,0 +1,1 @@
+# Bu dosya data/sessions klasörünün git tarafından takip edilmesini sağlar, ancak içerisindeki .json dosyaları .gitignore ile engellenir.
