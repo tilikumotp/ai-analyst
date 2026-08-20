@@ -59,21 +59,21 @@ Analiz sonuçları otomatik olarak dark-mode uyumlu interaktif Plotly çubuk, pa
 
 ```mermaid
 graph TD
-    User([🧑‍💻 Kullanıcı Sorusu]) --> Cache{⚡ Anlamsal Önbellek<br/>TF-IDF + Cosine}
-    Cache -- "Eşleşti (≥0.85)" --> FastReturn[⚡ 0-Token / <50ms Yanıt]
-    Cache -- "Önbellekte Yok" --> Router[🧭 Niyet ve Format Yönlendirici]
+    User(["🧑‍💻 Kullanıcı Sorusu"]) --> Cache{"⚡ Anlamsal Önbellek<br/>TF-IDF + Cosine"}
+    Cache -- "Eşleşti (≥0.85)" --> FastReturn["⚡ 0-Token / <50ms Yanıt"]
+    Cache -- "Önbellekte Yok" --> Router["🧭 Niyet ve Format Yönlendirici"]
 
-    Router --> Linker[🔍 Şema Budayıcı (Schema Linker)]
-    Linker --> Generator[🤖 Kod Üretici (Generator Agent)]
+    Router --> Linker["🔍 Şema Budayıcı (Schema Linker)"]
+    Linker --> Generator["🤖 Kod Üretici (Generator Agent)"]
 
-    Generator --> Critic{🧐 Critic Agent Denetimi}
-    Critic -- "Hata / Eksik" --> Refiner[🩹 Refiner Agent (Self-Healing)]
+    Generator --> Critic{"🧐 Critic Agent Denetimi"}
+    Critic -- "Hata / Eksik" --> Refiner["🩹 Refiner Agent (Self-Healing)"]
     Refiner --> Critic
-    Critic -- "Onaylandı" --> Sandbox[🔒 Güvenli AST Sandbox / SQLite]
+    Critic -- "Onaylandı" --> Sandbox["🔒 Güvenli AST Sandbox / SQLite"]
 
-    Sandbox --> Lineage[🌲 Veri Soyağacı (AST Lineage DAG)]
-    Lineage --> Synthesis[📑 Doğrulanmış Sentez & Yönetici Özeti]
-    Synthesis --> UI([📊 Sonuç, Tablo & İnteraktif Grafik])
+    Sandbox --> Lineage["🌲 Veri Soyağacı (AST Lineage DAG)"]
+    Lineage --> Synthesis["📑 Doğrulanmış Sentez & Yönetici Özeti"]
+    Synthesis --> UI(["📊 Sonuç, Tablo & İnteraktif Grafik"])
 ```
 
 1. **⚡ Anlamsal Önbellekleme (Semantic Caching):**

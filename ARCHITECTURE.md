@@ -23,39 +23,39 @@ Bu belge, **AI Data Analyst (Zero-Hallucination & Semantic Layer Engine)** uygul
 
 ```mermaid
 flowchart TD
-    User([🧑‍💻 Kullanıcı]) -->|Veri Yükleme: CSV/XLSX/SQL| Ingestion[📂 Veri Yükleme Katmanı]
-    User -->|Doğal Dil Sorusu| App[🖥️ Streamlit Arayüzü]
+    User(["🧑‍💻 Kullanıcı"]) -->|Veri Yükleme: CSV/XLSX/SQL| Ingestion["📂 Veri Yükleme Katmanı"]
+    User -->|Doğal Dil Sorusu| App["🖥️ Streamlit Arayüzü"]
 
-    subgraph Ingestion_Layer [1. Veri Hazırlama & Yükleme Katmanı]
-        Ingestion --> CSVLoader[📄 CSVLoader / csv.Sniffer]
-        CSVLoader -->|Encoding & Tip Koruması| DataFrames[(📊 Pandas DataFrames)]
-        CSVLoader -->|Şema Dönüşümü| SQLite[(💾 SQLite In-Memory DB)]
-        DataFrames --> HealthCheck[🩺 Veri Kalite & Sağlık Analizi]
+    subgraph Ingestion_Layer ["1. Veri Hazırlama & Yükleme Katmanı"]
+        Ingestion --> CSVLoader["📄 CSVLoader / csv.Sniffer"]
+        CSVLoader -->|Encoding & Tip Koruması| DataFrames[("📊 Pandas DataFrames")]
+        CSVLoader -->|Şema Dönüşümü| SQLite[("💾 SQLite In-Memory DB")]
+        DataFrames --> HealthCheck["🩺 Veri Kalite & Sağlık Analizi"]
     end
 
-    subgraph Core_Agent [2. Çift Motorlu ReAct Ajan Katmanı]
-        App --> IntentRouter[🎯 Intent Router: 4 Farklı Analist Personası]
-        IntentRouter --> SemanticLayer[🛡️ Semantik Katman & Pre-Flight Guardrail]
-        SemanticLayer --> Phase1[🧠 Aşama 1: Planlama & Kod Üretimi]
+    subgraph Core_Agent ["2. Çift Motorlu ReAct Ajan Katmanı"]
+        App --> IntentRouter["🎯 Intent Router: 4 Farklı Analist Personası"]
+        IntentRouter --> SemanticLayer["🛡️ Semantik Katman & Pre-Flight Guardrail"]
+        SemanticLayer --> Phase1["🧠 Aşama 1: Planlama & Kod Üretimi"]
         
-        Phase1 -->|CSV/Excel ise| PandasEngine[🐍 Pandas / Python Sandbox]
-        Phase1 -->|SQL/DB ise| SQLEngine[💾 SQLite Sorgu Motoru]
+        Phase1 -->|CSV/Excel ise| PandasEngine["🐍 Pandas / Python Sandbox"]
+        Phase1 -->|SQL/DB ise| SQLEngine["💾 SQLite Sorgu Motoru"]
         
-        PandasEngine -->|Hata Oluşursa| PySelfHealing[🩹 Python Self-Healing]
-        SQLEngine -->|Hata Oluşursa| SQLSelfHealing[🩹 SQL Self-Healing]
+        PandasEngine -->|Hata Oluşursa| PySelfHealing["🩹 Python Self-Healing"]
+        SQLEngine -->|Hata Oluşursa| SQLSelfHealing["🩹 SQL Self-Healing"]
         
         PySelfHealing --> PandasEngine
         SQLSelfHealing --> SQLEngine
         
-        PandasEngine --> ResultDF[(📊 result_df Doğrulanmış Tablo)]
+        PandasEngine --> ResultDF[("📊 result_df Doğrulanmış Tablo")]
         SQLEngine --> ResultDF
     end
 
-    subgraph Synthesis_Layer [3. Doğrulanmış Sentez & Çıktı Katmanı]
-        ResultDF --> Phase2[✍️ Aşama 2: Grounded Synthesis]
-        Phase2 -->|%100 Gerçek Veriyle Rapor| Report[📋 C-Level Yönetici Özeti & Bulgular]
-        PandasEngine --> Plotly[📈 Plotly İnteraktif Grafikler]
-        ResultDF --> Export[📥 CSV İndirme Butonu]
+    subgraph Synthesis_Layer ["3. Doğrulanmış Sentez & Çıktı Katmanı"]
+        ResultDF --> Phase2["✍️ Aşama 2: Grounded Synthesis"]
+        Phase2 -->|%100 Gerçek Veriyle Rapor| Report["📋 C-Level Yönetici Özeti & Bulgular"]
+        PandasEngine --> Plotly["📈 Plotly İnteraktif Grafikler"]
+        ResultDF --> Export["📥 CSV İndirme Butonu"]
     end
 
     Report --> App
@@ -135,22 +135,22 @@ Sistem, endüstri standardı **MAC-SQL**, **DAIL-SQL** ve **Semantic Caching** a
 
 ```mermaid
 flowchart TD
-    UserQuery([💬 Kullanıcı Sorusu]) --> CacheCheck{⚡ Semantic Cache?}
+    UserQuery(["💬 Kullanıcı Sorusu"]) --> CacheCheck{"⚡ Semantic Cache?"}
     
-    CacheCheck -->|Cache Hit >= 0.90| InstantReturn[⚡ 0-Token Anında Yanıt <50ms]
-    InstantReturn --> UI[🖥️ Streamlit UI]
+    CacheCheck -->|Cache Hit >= 0.90| InstantReturn["⚡ 0-Token Anında Yanıt <50ms"]
+    InstantReturn --> UI["🖥️ Streamlit UI"]
     
-    CacheCheck -->|Cache Miss| SchemaLink[🔍 Dynamic Schema Linker]
-    SchemaLink -->|Top-K Odaklanmış Kolonlar| Generator[🧠 Generator LLM]
+    CacheCheck -->|Cache Miss| SchemaLink["🔍 Dynamic Schema Linker"]
+    SchemaLink -->|Top-K Odaklanmış Kolonlar| Generator["🧠 Generator LLM"]
     
-    Generator -->|Üretilen Kod/SQL| CriticAgent{🧐 Critic & Refiner Loop}
-    CriticAgent -->|Kural/Kolon İhlali| Refiner[🩹 Generator Refiner]
+    Generator -->|Üretilen Kod/SQL| CriticAgent{"🧐 Critic & Refiner Loop"}
+    CriticAgent -->|Kural/Kolon İhlali| Refiner["🩹 Generator Refiner"]
     Refiner --> CriticAgent
-    CriticAgent -->|Onaylandı| SafeExec[🛡️ SafeExecutor / SQLite Sandbox]
+    CriticAgent -->|Onaylandı| SafeExec["🛡️ SafeExecutor / SQLite Sandbox"]
     
-    SafeExec --> LineageTracker[🌲 Data Lineage & XAI Tracker]
-    LineageTracker --> GroundedSynthesis[✍️ Grounded Report Synthesis]
-    GroundedSynthesis --> CacheStore[💾 Semantic Cache Kaydı]
+    SafeExec --> LineageTracker["🌲 Data Lineage & XAI Tracker"]
+    LineageTracker --> GroundedSynthesis["✍️ Grounded Report Synthesis"]
+    GroundedSynthesis --> CacheStore["💾 Semantic Cache Kaydı"]
     CacheStore --> UI
 ```
 
