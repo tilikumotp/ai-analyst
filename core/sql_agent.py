@@ -561,6 +561,7 @@ class SQLReActAgent:
             template = GROUNDED_SYNTHESIS_PROMPT
 
         synthesis_prompt = template.format(
+            user_question=user_message,
             data_table_str=table_str,
             row_count=len(result_df),
             sql_query=sql_query,
