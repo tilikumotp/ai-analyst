@@ -20,8 +20,9 @@ GÖREVİN:
 
 ## 📋 PYTHON & PANDAS KURALLARI:
 - Aktif veri seti: `df` (pandas.DataFrame)
-- `pd`, `np`, `px`, `go` kütüphaneleri zaten yüklüdür. `import ...` yazmana gerek yoktur.
+- `pd`, `np`, `px`, `go`, `plt`, `sns` kütüphaneleri zaten yüklüdür. `import ...` yazmana gerek yoktur.
 - Analiz sonucunu MUTLAKA `result_df` değişkenine ata.
+- Görselleştirme için Plotly (`fig = px.bar(...)` veya `go.Figure`) ya da Matplotlib/Seaborn (`plt.figure()`, `sns.barplot(...)`) kullanabilirsin.
   Örnek:
   ```python
   # En çok satan modelleri ve toplam adetleri hesapla

@@ -786,7 +786,10 @@ else:
 
             # Grafikleri göster
             for fig in msg.get("figures", []):
-                st.plotly_chart(fig, width="stretch")
+                if isinstance(fig, go.Figure):
+                    st.plotly_chart(fig, width="stretch")
+                else:
+                    st.pyplot(fig)
 
             # Teknik Detaylar ve Yönetişim
             applied_metrics = msg.get("applied_metrics", [])
@@ -916,7 +919,10 @@ else:
                 # Grafikler
                 if step_result.has_figure:
                     for fig in step_result.figures:
-                        st.plotly_chart(fig, width="stretch")
+                        if isinstance(fig, go.Figure):
+                            st.plotly_chart(fig, width="stretch")
+                        else:
+                            st.pyplot(fig)
 
                 # Teknik Detaylar, Kod, Veri Soyağacı ve Yönetişim
                 has_code = bool(step_result.executed_code or step_result.sql_query)

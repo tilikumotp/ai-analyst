@@ -37,6 +37,21 @@ import plotly.express as px
 import plotly.graph_objects as go
 import plotly.subplots as subplots
 
+# Matplotlib & Seaborn desteği (Headless backend ile güvenli çalıştırma)
+try:
+    import matplotlib
+    matplotlib.use("Agg")  # GUI thread çökmesini önlemek için headless backend
+    import matplotlib.pyplot as plt
+    import matplotlib.figure
+except ImportError:
+    matplotlib = None
+    plt = None
+
+try:
+    import seaborn as sns
+except ImportError:
+    sns = None
+
 
 # ─────────────────────────────────────────────────────────
 # Güvenli Import Mekanizması
@@ -44,8 +59,8 @@ import plotly.subplots as subplots
 
 # Import'a izin verilen temel modüller (ve alt modülleri)
 ALLOWED_BASE_MODULES = frozenset({
-    # Veri bilimi
-    "pandas", "numpy", "plotly",
+    # Veri bilimi & görselleştirme
+    "pandas", "numpy", "plotly", "matplotlib", "seaborn", "scipy", "sklearn",
     # Matematik & istatistik
     "math", "statistics", "decimal", "fractions",
     # Koleksiyonlar & araçlar
@@ -62,6 +77,7 @@ ALLOWED_BASE_MODULES = frozenset({
 BLOCKED_IMPORT_PATHS = frozenset({
     "plotly.io",
     "numpy.core.os",
+    "matplotlib.pyplot.show",  # blocking GUI show engeli
 })
 
 _original_import = _builtins.__import__
@@ -406,6 +422,9 @@ class SafeExecutor:
             "px": px,
             "go": go,
             "make_subplots": subplots.make_subplots,
+            "plt": plt,
+            "sns": sns,
+            "matplotlib": matplotlib,
             # Sonuç değişkenleri
             "fig": None,
             "result_df": None,
@@ -431,12 +450,26 @@ class SafeExecutor:
     ) -> ExecutionResult:
         """exec_globals içinden figure, result_df ve değişiklikleri topla."""
 
-        # Tüm Plotly Figure nesnelerini topla (fig, fig1, fig2, ...)
+        # Tüm Plotly ve Matplotlib Figure nesnelerini topla (fig, fig1, fig2, ...)
         for var_name, var_value in exec_globals.items():
             if var_name.startswith("_"):
                 continue  # private değişkenleri atla
-            if var_value is not None and isinstance(var_value, go.Figure):
-                result.figures.append(var_value)
+            if var_value is not None:
+                if isinstance(var_value, go.Figure):
+                    result.figures.append(var_value)
+                elif matplotlib and isinstance(var_value, matplotlib.figure.Figure):
+                    result.figures.append(var_value)
+
+        # Matplotlib pyplot çağrılarıyla oluşturulan aktif figürleri topla
+        if plt is not None:
+            try:
+                for num in plt.get_fignums():
+                    fig_obj = plt.figure(num)
+                    if fig_obj not in result.figures and fig_obj.axes:
+                        result.figures.append(fig_obj)
+                plt.close("all")
+            except Exception:
+                pass
 
         # result_df kontrolü
         rdf = exec_globals.get("result_df")
