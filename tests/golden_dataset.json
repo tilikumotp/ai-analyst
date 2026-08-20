@@ -25,6 +25,38 @@
     "difficulty": "medium"
   },
   {
+    "id": "AUTO_04",
+    "domain": "Automotive",
+    "question": "Her model için ortalama kilometre ve fiyat nedir? En pahalıdan ucuza sırala",
+    "expected_groupby": "Model",
+    "expected_agg": ["mean"],
+    "expected_order": "desc",
+    "difficulty": "medium"
+  },
+  {
+    "id": "AUTO_05",
+    "domain": "Automotive",
+    "question": "Yakıt tipine göre araç sayısını ve ortalama fiyatı hesapla",
+    "expected_groupby": "Fuel_Type",
+    "expected_agg": ["count", "mean"],
+    "difficulty": "easy"
+  },
+  {
+    "id": "AUTO_06",
+    "domain": "Automotive",
+    "question": "En yüksek satış rakamına sahip bölgedeki modellerin dağılımı nedir?",
+    "expected_subquery": true,
+    "difficulty": "hard"
+  },
+  {
+    "id": "AUTO_07",
+    "domain": "Automotive",
+    "question": "Yıllık satış trendini göster ve hangi yılın en yüksek büyümeye sahip olduğunu bul",
+    "expected_groupby": "Year",
+    "expected_window_func": "pct_change",
+    "difficulty": "hard"
+  },
+  {
     "id": "RETAIL_01",
     "domain": "Retail & E-commerce",
     "question": "Kategori bazında toplam ciro ve ortalama birim fiyatları hesapla",
@@ -41,6 +73,44 @@
     "difficulty": "medium"
   },
   {
+    "id": "RETAIL_03",
+    "domain": "Retail & E-commerce",
+    "question": "Aylık satış trendini çiz ve en iyi ayı tespit et",
+    "expected_groupby": "Ay",
+    "expected_chart": true,
+    "difficulty": "medium"
+  },
+  {
+    "id": "RETAIL_04",
+    "domain": "Retail & E-commerce",
+    "question": "Her müşterinin toplam harcamasını ve sipariş sayısını listele, en çok harcayan 10 müşteriyi göster",
+    "expected_groupby": "Müşteri_ID",
+    "expected_agg": ["sum", "count"],
+    "expected_limit": 10,
+    "difficulty": "medium"
+  },
+  {
+    "id": "RETAIL_05",
+    "domain": "Retail & E-commerce",
+    "question": "Ürün kategorisi ve bölgeye göre çapraz tablo oluştur (pivot)",
+    "expected_pivot": true,
+    "difficulty": "hard"
+  },
+  {
+    "id": "RETAIL_06",
+    "domain": "Retail & E-commerce",
+    "question": "İndirim oranı ile satış miktarı arasındaki korelasyonu hesapla",
+    "expected_stat": "correlation",
+    "difficulty": "medium"
+  },
+  {
+    "id": "RETAIL_07",
+    "domain": "Retail & E-commerce",
+    "question": "Son 3 ayın satışları önceki 3 aya kıyasla nasıl değişmiş?",
+    "expected_comparison": "period_over_period",
+    "difficulty": "hard"
+  },
+  {
     "id": "FINANCE_01",
     "domain": "Finance",
     "question": "Aylık satış trendini ve aydan aya değişim oranını göster",
@@ -53,5 +123,176 @@
     "question": "Fiyatı 1.000 TL üzerinde olan ve satış adedi 2'den fazla olan işlemleri filtrele",
     "expected_filter": "Birim_Fiyat > 1000",
     "difficulty": "medium"
+  },
+  {
+    "id": "FINANCE_03",
+    "domain": "Finance",
+    "question": "Gelir ve giderlere göre net kar marjını hesapla ve görselleştir",
+    "expected_calc": "net_margin",
+    "expected_chart": true,
+    "difficulty": "hard"
+  },
+  {
+    "id": "FINANCE_04",
+    "domain": "Finance",
+    "question": "Kümülatif satışları hesapla ve zaman içindeki birikimli büyümeyi göster",
+    "expected_window_func": "cumsum",
+    "difficulty": "hard"
+  },
+  {
+    "id": "FINANCE_05",
+    "domain": "Finance",
+    "question": "Harcama kategorilerini pasta grafik ile göster",
+    "expected_chart_type": "pie",
+    "difficulty": "easy"
+  },
+  {
+    "id": "HR_01",
+    "domain": "HR & People Analytics",
+    "question": "Departmanlara göre çalışan sayısı ve ortalama maaşı hesapla",
+    "expected_groupby": "Departman",
+    "expected_agg": ["count", "mean"],
+    "difficulty": "easy"
+  },
+  {
+    "id": "HR_02",
+    "domain": "HR & People Analytics",
+    "question": "Kıdeme göre maaş dağılımını göster ve en yüksek maaşlı 5 çalışanı listele",
+    "expected_groupby": "Kıdem",
+    "expected_limit": 5,
+    "difficulty": "medium"
+  },
+  {
+    "id": "HR_03",
+    "domain": "HR & People Analytics",
+    "question": "Departman ve cinsiyete göre ortalama maaş farkını analiz et",
+    "expected_groupby": ["Departman", "Cinsiyet"],
+    "difficulty": "medium"
+  },
+  {
+    "id": "HR_04",
+    "domain": "HR & People Analytics",
+    "question": "İşe alım tarihi ile mevcut performans puanı arasında korelasyon var mı?",
+    "expected_stat": "correlation",
+    "difficulty": "hard"
+  },
+  {
+    "id": "HEALTH_01",
+    "domain": "Healthcare",
+    "question": "Yaş grubuna göre hasta sayısı ve ortalama tedavi süresini hesapla",
+    "expected_groupby": "Yaş_Grubu",
+    "expected_agg": ["count", "mean"],
+    "difficulty": "medium"
+  },
+  {
+    "id": "HEALTH_02",
+    "domain": "Healthcare",
+    "question": "Tanı türüne göre hastane kalış sürelerini karşılaştır",
+    "expected_groupby": "Tanı",
+    "expected_metric": "Kalış_Süresi",
+    "difficulty": "medium"
+  },
+  {
+    "id": "ECOM_01",
+    "domain": "E-commerce",
+    "question": "Müşteri başına ortalama sipariş değerini (AOV) hesapla",
+    "expected_calc": "AOV",
+    "difficulty": "easy"
+  },
+  {
+    "id": "ECOM_02",
+    "domain": "E-commerce",
+    "question": "Ürün iade oranını kategoriye göre hesapla ve en yüksek iade oranına sahip 3 kategoriyi listele",
+    "expected_groupby": "Kategori",
+    "expected_calc": "iade_oranı",
+    "expected_limit": 3,
+    "difficulty": "medium"
+  },
+  {
+    "id": "ECOM_03",
+    "domain": "E-commerce",
+    "question": "Sepet terk oranını saate göre grupla ve görselleştir",
+    "expected_groupby": "Saat",
+    "expected_chart": true,
+    "difficulty": "hard"
+  },
+  {
+    "id": "SUPPLY_01",
+    "domain": "Supply Chain",
+    "question": "Tedarikçi başına ortalama teslimat süresini ve gecikme oranını hesapla",
+    "expected_groupby": "Tedarikçi",
+    "expected_agg": ["mean"],
+    "difficulty": "medium"
+  },
+  {
+    "id": "SUPPLY_02",
+    "domain": "Supply Chain",
+    "question": "Stok devir hızı en düşük olan 5 ürünü listele",
+    "expected_calc": "stok_devir_hızı",
+    "expected_limit": 5,
+    "expected_order": "asc",
+    "difficulty": "hard"
+  },
+  {
+    "id": "MARKETING_01",
+    "domain": "Marketing",
+    "question": "Kampanya kanalına göre dönüşüm oranını karşılaştır",
+    "expected_groupby": "Kanal",
+    "expected_calc": "dönüşüm_oranı",
+    "difficulty": "medium"
+  },
+  {
+    "id": "MARKETING_02",
+    "domain": "Marketing",
+    "question": "Reklam harcaması ile satış geliri arasındaki ilişkiyi scatter plot ile göster",
+    "expected_chart_type": "scatter",
+    "expected_stat": "correlation",
+    "difficulty": "medium"
+  },
+  {
+    "id": "ANALYTICS_01",
+    "domain": "Web Analytics",
+    "question": "Sayfaya göre benzersiz ziyaretçi sayısı ve ortalama oturum süresini göster",
+    "expected_groupby": "Sayfa",
+    "expected_agg": ["nunique", "mean"],
+    "difficulty": "medium"
+  },
+  {
+    "id": "ANALYTICS_02",
+    "domain": "Web Analytics",
+    "question": "Haftanın günlerine göre trafik dağılımını bar grafik ile göster",
+    "expected_groupby": "Gün",
+    "expected_chart_type": "bar",
+    "difficulty": "easy"
+  },
+  {
+    "id": "GENERAL_01",
+    "domain": "General",
+    "question": "Veri setinin genel istatistiklerini (ortalama, medyan, std, min, max) göster",
+    "expected_stat": "describe",
+    "difficulty": "easy"
+  },
+  {
+    "id": "GENERAL_02",
+    "domain": "General",
+    "question": "Eksik değerlerin sütun bazında dağılımını göster",
+    "expected_stat": "missing_values",
+    "difficulty": "easy"
+  },
+  {
+    "id": "GENERAL_03",
+    "domain": "General",
+    "question": "Sayısal sütunlar arasındaki korelasyon matrisini ısı haritası ile görselleştir",
+    "expected_chart_type": "heatmap",
+    "expected_stat": "correlation_matrix",
+    "difficulty": "medium"
+  },
+  {
+    "id": "GENERAL_04",
+    "domain": "General",
+    "question": "Her sütundaki aykırı değerleri (outlier) IQR yöntemiyle tespit et",
+    "expected_stat": "outlier_detection",
+    "expected_method": "IQR",
+    "difficulty": "hard"
   }
 ]

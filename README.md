@@ -100,8 +100,24 @@ Sistem `tests/golden_dataset.json` üzerindeki benchmark testlerinde tam başar�
 | **Semantic Groundedness** | `%100.0` | Sayı ve sıralamalar doğrulanmış verilere sadık |
 | **Cache Hit Latency** | `6.2 ms` | Önbellekten dönen sorgu gecikmesi |
 | **Critic Resolution Rate** | `%100.0` | Şema tutarsızlıklarının düzeltilme oranı |
+| **Sandbox Security Tests** | `19/19` | Bilinen kaçış vektörleri tamamen engellendi |
+
+**Golden Dataset:** 38 örnek · 9 farklı domain · easy / medium / hard dağılımı
+
+| Domain | Örnek Sayısı | İçerdiği Operasyonlar |
+|:---|:---:|:---|
+| Automotive | 7 | GROUP BY, FILTER, window, subquery |
+| Retail & E-commerce | 7 | JOIN, pivot, correlation, period-over-period |
+| Finance | 5 | cumsum, net margin, trend analysis |
+| HR & People Analytics | 4 | multi-column GROUP BY, correlation |
+| Healthcare | 2 | aggregation, comparison |
+| E-commerce | 3 | AOV, return rate, funnel |
+| Supply Chain | 2 | complex calc, ordering |
+| Marketing | 2 | conversion rate, scatter |
+| Web Analytics + General | 6 | describe, missing values, heatmap, outlier detection |
 
 ---
+
 
 ## 🚀 Hızlı Başlangıç
 
@@ -138,9 +154,14 @@ Tarayıcınızda [http://localhost:8501](http://localhost:8501) adresini açın.
 ```
 ai-analyst/
 ├── app.py                     # Streamlit Arayüzü, Oturum & Grafik Yönetimi
-├── requirements.txt           # Python Bağımlılıkları
+├── requirements.txt           # Python Bağımlılıkları (sürüm aralıklı)
+├── .env.example               # Ortam değişkenleri şablonu
+├── LICENSE                    # MIT Lisansı
 ├── ARCHITECTURE.md            # Detaylı Kurumsal Sistem Mimarisi Belgesi
 ├── PORTFOLIO_NOTES.md         # Mülakat & CV Teknik Savunma Rehberi
+├── .github/
+│   └── workflows/
+│       └── ci.yml             # GitHub Actions CI Pipeline
 ├── assets/                    # Dokümantasyon ve Ekran Görüntüleri
 │   ├── hero_banner.png
 │   ├── chat_analysis_dashboard.png
@@ -164,11 +185,13 @@ ai-analyst/
 │   └── executor.py            # AST Güvenlikli Python / Plotly Sandbox'ı
 ├── tests/
 │   ├── evaluation.py          # Otomatik Benchmark Değerlendirici
-│   └── golden_dataset.json    # Altın Standart Doğrulama Veri Seti
+│   ├── test_sandbox_security.py  # Sandbox güvenlik birim testleri (19 test)
+│   └── golden_dataset.json    # 38 Örnek Altın Standart Doğrulama Veri Seti
 └── data/
     ├── business_glossary.json  # Kurumsal İş Kuralları Kataloğu
     └── sessions/              # Kalıcı Oturumlar & Veri Setleri
 ```
+
 
 ---
 

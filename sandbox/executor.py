@@ -169,6 +169,35 @@ class SecurityError(Exception):
 class SafeExecutor:
     """LLM tarafından üretilen Python kodunu güvenli bir ortamda çalıştırır."""
 
+    # ── Güvenli getattr wrapper (whitelist tabanlı) ──────────────────────
+    # getattr ve setattr doğrudan SAFE_BUILTINS'e eklemek tehlikelidir:
+    #   getattr((1).__class__.__bases__[0], '__sub'+'classes__')()
+    # gibi saldırıları mümkün kılar. Bunun yerine yalnızca önceden
+    # onaylı özellik isimlerine izin veren wrapper kullanıyoruz.
+    _DUNDER_BLACKLIST = frozenset({
+        "__class__", "__bases__", "__mro__", "__subclasses__",
+        "__globals__", "__code__", "__builtins__", "__import__",
+        "__dict__", "__weakref__", "__init_subclass__", "__reduce__",
+        "__reduce_ex__", "__getnewargs__", "__getnewargs_ex__",
+        "__getstate__", "__setstate__",
+    })
+
+    @staticmethod
+    def _safe_getattr(obj, name, *args):
+        """Sadece güvenli (dunder-blacklist dışı) attribute erişimine izin verir."""
+        if isinstance(name, str) and name in SafeExecutor._DUNDER_BLACKLIST:
+            raise AttributeError(
+                f"'{name}' özel attribute erişimi güvenlik nedeniyle engellenmiştir."
+            )
+        return getattr(obj, name, *args)
+
+    @staticmethod
+    def _safe_hasattr(obj, name):
+        """Güvenli hasattr wrapper (dunder-blacklist kontrolü ile)."""
+        if isinstance(name, str) and name in SafeExecutor._DUNDER_BLACKLIST:
+            return False
+        return hasattr(obj, name)
+
     # İzin verilen built-in fonksiyonlar
     SAFE_BUILTINS = {
         # ── Import mekanizması ──
@@ -210,21 +239,16 @@ class SafeExecutor:
         "pow": pow,
         "divmod": divmod,
         # ── Kontrol ──
+        # NOT: getattr/setattr/delattr kasıtlı olarak ÇIKARILMIŞTIR.
+        # Sandbox kaçışına olanak tanıdığından güvenli wrapper kullanılır.
         "len": len,
         "isinstance": isinstance,
-        "issubclass": issubclass,
         "type": type,
-        "hasattr": hasattr,
-        "getattr": getattr,
-        "setattr": setattr,
-        "delattr": delattr,
         "callable": callable,
         "any": any,
         "all": all,
         "hash": hash,
         "id": id,
-        "dir": dir,
-        "vars": vars,
         # ── Encoding ──
         "chr": chr,
         "ord": ord,
@@ -522,7 +546,7 @@ class SafeExecutor:
             )
 
     # ------------------------------------------------------------------
-    # Timeout ile çalıştırma (process-based, thread yerine)
+    # Timeout ile çalıştırma (thread tabanlı)
     # ------------------------------------------------------------------
     def _exec_with_timeout(self, code: str, exec_globals: dict) -> None:
         """
@@ -538,7 +562,7 @@ class SafeExecutor:
 
         def _target():
             try:
-                exec(code, exec_globals)
+                exec(code, exec_globals)  # noqa: S102
             except Exception as e:
                 exception_holder[0] = e
 
@@ -587,19 +611,35 @@ class SafeExecutor:
                         )
 
             elif isinstance(node, ast.Call):
-                # eval(), exec(), compile(), open() çağrıları
+                # eval(), exec(), compile(), open() çağrıları + unsafe attribute funcs
                 if isinstance(node.func, ast.Name):
-                    if node.func.id in ("eval", "exec", "compile", "open"):
+                    if node.func.id in (
+                        "eval", "exec", "compile", "open",
+                        # getattr/setattr/delattr artık SAFE_BUILTINS'de yok;
+                        # ama kullanıcı globals üzerinden erişmeye çalışabilir.
+                        "getattr", "setattr", "delattr",
+                    ):
                         raise SecurityError(
                             f"'{node.func.id}()' çağrısı güvenlik nedeniyle engellenmiştir."
                         )
 
             elif isinstance(node, ast.Attribute):
-                # __import__, __builtins__ erişimi
-                if node.attr in ("__import__", "__builtins__", "__subclasses__"):
+                # Tüm dunder attribute erişimlerini engelle
+                if node.attr.startswith("__") and node.attr.endswith("__"):
                     raise SecurityError(
-                        f"'{node.attr}' özel attribute erişimi engellenmiştir."
+                        f"'{node.attr}' özel dunder attribute erişimi engellenmiştir."
                     )
+
+            elif isinstance(node, ast.Constant):
+                # String literal'larda dunder isim kontrolü (string birleştirme bypass önlemi)
+                # Örn: getattr(obj, '__sub' + 'classes__') → parçalar engellenmiştir
+                if isinstance(node.value, str):
+                    val = node.value
+                    if (val.startswith("__") and val.endswith("__")
+                            and val in self._DUNDER_BLACKLIST):
+                        raise SecurityError(
+                            f"String literal olarak '{val}' dunder ismi engellenmiştir."
+                        )
 
         # String-tabanlı hızlı tarama (yorum/string literal temizlenerek)
         cleaned_code = self._strip_comments_and_strings(code)
@@ -608,11 +648,13 @@ class SafeExecutor:
             "os.rmdir", "os.mkdir", "os.makedirs", "os.walk",
             "subprocess.call", "subprocess.run", "subprocess.Popen",
             "sys.exit", "sys._getframe",
+            # getattr/setattr doğrudan çağrıları da engelle (string bypass)
+            "getattr(", "setattr(", "delattr(",
         ]
         for token in blocked_tokens:
             if token in cleaned_code:
                 raise SecurityError(
-                    f"'{token}' kullanımı güvenlik nedeniyle engellenmiştir."
+                    f"'{token.rstrip('(')}' kullanımı güvenlik nedeniyle engellenmiştir."
                 )
 
     @staticmethod

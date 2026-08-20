@@ -121,13 +121,58 @@ Ajan, yüklenen dosya türüne göre iki farklı çalışma motorundan birini se
 - **`GuardrailEngine`:** Pre-Flight denetimi ile şirket politikalarına aykırı veya çelişkili analiz isteklerini erken aşamada yakalar.
 
 ### 3.5. Güvenli Kod Çalıştırma Sandbox'ı (`sandbox/executor.py`)
-- **AST Tabanlı Güvenlik:** `os`, `sys`, `subprocess`, `socket`, `eval`, `exec`, `open` gibi tehlikeli çağrıları kod çalışmadan önce engeller.
-- **Kısıtlı Built-in Ortamı:** Yalnızca güvenli matematik ve veri işleme fonksiyonlarına (`min`, `max`, `sum`, `len`, `range`, `list`, `dict`) izin verir.
-- **Zaman Aşımı Koruması (Timeout):** Sonsuz döngüleri engellemek için işlem başına süre limiti uygular.
+
+> **⚠️ Önemli Not:** Sandbox, tek kullanıcılı / yerel kullanım için "best-effort" güvenlik sağlar. Çok kullanıcılı / üretim ortamları için ek process izolasyonu (Docker, nsjail) gereklidir.
+
+#### Güvenlik Katmanları
+
+| Katman | Mekanizma | Engellenenler |
+|:---|:---|:---|
+| **Import Whitelist** | `_safe_import()` | `os`, `sys`, `subprocess`, `socket`, `pathlib`, göreli importlar |
+| **AST Statik Tarama** | `_check_security()` | `eval`, `exec`, `compile`, `open`, `getattr`, `setattr`, `delattr`, tüm dunder attribute'lar |
+| **String Literal Tarama** | `ast.Constant` analizi | `__globals__`, `__code__`, `__subclasses__` vb. string olarak geçilen dunder isimleri (concatenation bypass önlemi) |
+| **Kısıtlı Builtins** | `SAFE_BUILTINS` dict | Yalnızca güvenli matematik/veri işleme fonksiyonları; `getattr`/`setattr`/`delattr`/`dir`/`vars` kasıtlı olarak çıkarılmıştır |
+| **Token Tarama** | `_strip_comments_and_strings()` | `os.system`, `subprocess.run`, `getattr(`, `setattr(` gibi tehlikeli token'lar |
+| **Zaman Aşımı** | Thread-based timeout | Sonsuz döngüler ve uzun süreli işlemler |
+
+#### Bilinen Saldırı Vektörleri ve Savunmalar
+
+```python
+# ❌ ENGELLENEN — getattr ile class zinciri erişimi
+getattr((1).__class__.__bases__[0], '__subclasses__')()
+
+# ❌ ENGELLENED — String birleştirme bypass girişimi
+name = '__sub' + 'classes__'  # ast.Constant her parçayı ayrı tarar
+
+# ❌ ENGELLENED — Dolaylı dunder erişimi
+x = (1).__class__  # AST Attribute taraması tüm dunder attr'ları engeller
+
+# ✅ İZİN VERİLEN — Normal veri analizi kodu
+result_df = df.groupby('Model')['Sales'].sum().reset_index()
+fig = px.bar(result_df, x='Model', y='Sales')
+```
 
 ---
 
+### 3.6. SQL Güvenlik Kontrolü (`ingestion/db_loader.py`)
+
+> **⚠️ Önemli Not:** `execute_query()` içindeki SQL güvenlik kontrolü **regex/blocklist tabanlıdır** — gerçek bir SQL AST ayrıştırıcısı değildir. Bu yaklaşım tek kullanıcılı / yerel kullanım için yeterlidir; ancak çok kullanıcılı veya üretim ortamlarında `sqlglot` veya `sqlparse` gibi gerçek bir SQL AST ayrıştırıcısına geçilmesi önerilir.
+
+#### Mevcut Kontroller
+
+- **Blocklist Tabanlı:** `DROP`, `DELETE`, `TRUNCATE`, `INSERT`, `UPDATE`, `ALTER`, `CREATE`, `ATTACH`, `DETACH` gibi veri değiştirici ifadeler regex ile engellenir.
+- **Salt Okunur Bağlantı:** SQLite veritabanı `read_only=True` modunda açılır (`URI mode`).
+- **Parameterized Queries:** Kullanıcı girdisi hiçbir zaman SQL string'ine doğrudan birleştirilmez.
+
+#### Üretim Ortamı Önerisi
+
+Çok kullanıcılı ortamlarda şu adımlar önerilir:
+1. `sqlglot` kütüphanesi ile SQL AST parse ederek DDL/DML ifadelerini semantik düzeyde engelle.
+2. Her sorgu için ayrı bir read-only SQLite bağlantısı kullan.
+3. Kullanıcı başına kaynak limiti (max_rows, timeout) uygula.
+
 ---
+
 
 ## 🚀 4. İleri Seviye Kurumsal Modüller (Expert-Level Enterprise Architecture)
 

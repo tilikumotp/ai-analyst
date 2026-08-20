@@ -1,0 +1,86 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+jobs:
+  test:
+    name: 🧪 Lint & Test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🐍 Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: 📦 Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: 📥 Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest ruff
+
+      - name: 🔍 Lint with ruff
+        run: |
+          ruff check . --select E,F,W --ignore E501,W503 --exclude venv,__pycache__
+
+      - name: 🛡️ Run sandbox security tests
+        run: |
+          pytest tests/test_sandbox_security.py -v
+
+      - name: 🏆 Run golden dataset evaluation
+        run: |
+          # Evaluation requires a running LLM server — skip in CI, just check syntax
+          python -c "
+          import json, sys
+          with open('tests/golden_dataset.json') as f:
+              data = json.load(f)
+          assert len(data) >= 30, f'Golden dataset too small: {len(data)} examples'
+          print(f'✅ Golden dataset OK: {len(data)} examples loaded')
+          "
+
+      - name: 🏗️ Check app.py imports
+        run: |
+          python -c "
+          # Sadece import'ları ve syntax'ı kontrol et (Streamlit çalıştırmadan)
+          import ast, sys
+          with open('app.py') as f:
+              source = f.read()
+          ast.parse(source)
+          print('✅ app.py syntax OK')
+          "
+
+      - name: 🏗️ Check core modules syntax
+        run: |
+          python -c "
+          import ast, os
+          for root, dirs, files in os.walk('.'):
+              dirs[:] = [d for d in dirs if d not in ('venv', '__pycache__', '.git')]
+              for f in files:
+                  if f.endswith('.py') and root != '.':
+                      path = os.path.join(root, f)
+                      try:
+                          with open(path, encoding='utf-8') as fh:
+                              ast.parse(fh.read())
+                      except SyntaxError as e:
+                          print(f'❌ Syntax error in {path}: {e}')
+                          exit(1)
+          print('✅ All Python files syntax OK')
+          "
