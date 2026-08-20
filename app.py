@@ -314,6 +314,9 @@ if "agent" not in st.session_state:
         kb_manager=st.session_state.kb_manager,
     )
 
+if "history" not in st.session_state:
+    st.session_state.history = ChatHistory()
+
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
@@ -326,11 +329,27 @@ if "active_dataset" not in st.session_state:
 if "pending_prompt" not in st.session_state:
     st.session_state.pending_prompt = None
 
-if "history" not in st.session_state:
-    st.session_state.history = ChatHistory()
-
 if "session_id" not in st.session_state:
     st.session_state.session_id = ChatHistory.generate_id()
+
+# ── Oturum ve Veri Seti Kalıcılığı (Auto-Restore on Startup) ──
+if "session_initialized" not in st.session_state:
+    st.session_state.session_initialized = True
+    recent_sessions = st.session_state.history.list_sessions(limit=1)
+    if recent_sessions:
+        last_sess = recent_sessions[0]
+        loaded = st.session_state.history.load_session(last_sess["id"])
+        if loaded:
+            st.session_state.session_id = last_sess["id"]
+            st.session_state.messages = loaded.get("messages", [])
+            loaded_datasets = st.session_state.history.load_datasets(last_sess["id"])
+            if loaded_datasets:
+                for d_key, d_entry in loaded_datasets.items():
+                    tbl_name = st.session_state.db_manager.load_dataframe(d_entry["df"], d_key)
+                    d_entry["sql_table"] = tbl_name
+                    d_entry["metadata"]["sql_table"] = tbl_name
+                st.session_state.datasets = loaded_datasets
+                st.session_state.active_dataset = loaded.get("active_dataset") or next(iter(loaded_datasets.keys()))
 
 MAX_DATASETS = 5  # Maksimum yüklenebilir dosya sayısı
 
@@ -340,13 +359,13 @@ MAX_DATASETS = 5  # Maksimum yüklenebilir dosya sayısı
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 def _save_current_session():
-    """Mevcut sohbeti geçmişe kaydet."""
-    if not st.session_state.messages:
+    """Mevcut sohbeti ve veri setlerini geçmişe kalıcı olarak kaydet."""
+    if not st.session_state.messages and not st.session_state.datasets:
         return
 
     file_names = [
-        entry["metadata"].get("dosya_adi")
-        for entry in st.session_state.datasets.values()
+        entry["metadata"].get("dosya_adi", key)
+        for key, entry in st.session_state.datasets.items()
         if entry.get("metadata")
     ]
 
@@ -354,7 +373,14 @@ def _save_current_session():
         session_id=st.session_state.session_id,
         messages=st.session_state.messages,
         file_names=file_names if file_names else None,
+        active_dataset=st.session_state.active_dataset,
     )
+
+    if st.session_state.datasets:
+        st.session_state.history.save_datasets(
+            session_id=st.session_state.session_id,
+            datasets=st.session_state.datasets,
+        )
 
 
 def _get_active_df() -> Optional[pd.DataFrame]:
@@ -444,14 +470,15 @@ with st.sidebar:
                         "sql_table": sql_table,
                     }
                     st.session_state.active_dataset = dataset_key
-                    st.toast(f"✅ `{uploaded_file.name}` yüklendi (Tablo: `{sql_table}`)", icon="📊")
+                    _save_current_session()
+                    st.toast(f"✅ `{uploaded_file.name}` yüklendi ve kalıcı olarak kaydedildi!", icon="📊")
                 except Exception as e:
                     st.error(f"❌ Dosya yükleme hatası: {e}")
 
     # ── Yüklü Veri Setleri Listesi ──
     if _has_datasets():
         st.markdown("---")
-        st.caption(f"📊 **{len(st.session_state.datasets)}** tablo SQLite üzerinde hazır")
+        st.caption(f"📊 **{len(st.session_state.datasets)}** tablo hazır (Kalıcı Saklanıyor)")
 
         for ds_key, ds_entry in list(st.session_state.datasets.items()):
             meta = ds_entry.get("metadata", {})
@@ -476,6 +503,7 @@ with st.sidebar:
                 if not is_active:
                     if st.button("📌", key=f"pin_{ds_key}", help="Aktif yap"):
                         st.session_state.active_dataset = ds_key
+                        _save_current_session()
                         st.rerun()
 
             with col_del:
@@ -487,6 +515,7 @@ with st.sidebar:
                             st.session_state.active_dataset = next(iter(st.session_state.datasets))
                         else:
                             st.session_state.active_dataset = None
+                    _save_current_session()
                     st.rerun()
 
         # ── Aktif Tablo Özeti ──
@@ -571,9 +600,12 @@ with st.sidebar:
     st.markdown('<hr class="sidebar-divider">', unsafe_allow_html=True)
 
     # ── Yeni Sohbet ──
-    if st.button("🔄 Yeni Sohbet Başlat", width="stretch"):
-        if st.session_state.messages:
+    if st.button("➕ Yeni Sohbet Başlat", width="stretch"):
+        if st.session_state.messages or st.session_state.datasets:
             _save_current_session()
+        st.session_state.db_manager.clear_all()
+        st.session_state.datasets = {}
+        st.session_state.active_dataset = None
         st.session_state.messages = []
         st.session_state.session_id = ChatHistory.generate_id()
         st.rerun()
@@ -581,7 +613,7 @@ with st.sidebar:
     # ── Tüm Veri Setlerini Sıfırla ──
     if _has_datasets():
         if st.button("🗑️ Tüm Tabloları Temizle", width="stretch"):
-            if st.session_state.messages:
+            if st.session_state.messages or st.session_state.datasets:
                 _save_current_session()
             st.session_state.db_manager.clear_all()
             st.session_state.datasets = {}
@@ -605,17 +637,28 @@ with st.sidebar:
 
             col_btn, col_del = st.columns([5, 1])
             with col_btn:
-                if st.button(f"💬 {title}", key=f"load_{sess['id']}", help=f"{msg_count} mesaj{file_badge}"):
-                    if st.session_state.messages:
+                if st.button(f"💬 {title}", key=f"load_{sess['id']}", help=f"{msg_count} mesaj{file_badge}", width="stretch"):
+                    if st.session_state.messages or st.session_state.datasets:
                         _save_current_session()
                     loaded = st.session_state.history.load_session(sess["id"])
                     if loaded:
-                        st.session_state.messages = [
-                            {"role": m["role"], "content": m["content"]}
-                            for m in loaded.get("messages", [])
-                        ]
+                        st.session_state.messages = loaded.get("messages", [])
                         st.session_state.session_id = sess["id"]
-                        st.session_state.loaded_file_names = loaded.get("file_names", [])
+
+                        # Veri setlerini diskten otomatik yükle ve SQLite'a bağla
+                        st.session_state.db_manager.clear_all()
+                        loaded_datasets = st.session_state.history.load_datasets(sess["id"])
+                        if loaded_datasets:
+                            for d_key, d_entry in loaded_datasets.items():
+                                tbl_name = st.session_state.db_manager.load_dataframe(d_entry["df"], d_key)
+                                d_entry["sql_table"] = tbl_name
+                                d_entry["metadata"]["sql_table"] = tbl_name
+                            st.session_state.datasets = loaded_datasets
+                            st.session_state.active_dataset = loaded.get("active_dataset") or next(iter(loaded_datasets.keys()))
+                        else:
+                            st.session_state.datasets = {}
+                            st.session_state.active_dataset = None
+
                         st.rerun()
 
             with col_del:
