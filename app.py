@@ -10,6 +10,8 @@ import uuid
 from typing import Optional, List, Dict, Any, Tuple
 import streamlit as st
 import pandas as pd
+import plotly.graph_objects as go
+import plotly.express as px
 
 from core.sql_agent import SQLReActAgent, AgentStepResult
 from core.knowledge_base import KnowledgeBaseManager, BusinessMetric
