@@ -72,15 +72,3 @@ Mülakatlarda veya proje sunumlarında aşağıdaki ana mimari sütunları vurgu
 
 ---
 
-## 💼 2. CV / Portföy İçin Örnek Proje Açıklaması
-
-### 📄 Proje Başlığı (CV):
-**AI Data Analyst — Local Text-to-SQL, Enterprise Semantic Layer & Dynamic Intent Routing Platform**
-
-### 📌 Madde İmleri (Bullet Points):
-- **Dinamik Niyet Yönlendirme (Dynamic Intent Routing):** Kullanıcı sorgusunu Trend Mimarı, Risk/Fraud Dedektörü veya Stratejik Keşif Danışmanı modlarına dinamik yönlendiren çoklu-persona mimarisi tasarlandı.
-- **Sıfır-LLM Otomatik Veri Profilleme (Data Profiling):** Yükleme anında eksiklik, IQR aykırı değerleri, dağılım çarpıklığı ve veri sağlığı skorunu hesaplayan yüksek performanslı profilleme motoru geliştirildi.
-- **Kurumsal Semantik Katman & Metrik Deposu (Semantic Layer):** İş tanımları, SQL formülleri, zorunlu filtreler (`mandatory filters`), sürümleme (`versioning`) ve departman sahipliği (`owner`) içeren dinamik metrik yaşam döngüsü mimarisi kuruldu.
-- **Pre-Flight Guardrail Katmanı:** Kurumsal veri standartlarına aykırı sorguları LLM çağrısına gitmeden önce sıfır-maliyetle tespit eden ve erken çıkış (early return) sağlayan koruma katmanı inşa edildi.
-- **Deterministik Text-to-SQL & SQLite:** Ham Pandas kodu yerine deterministik ilişkisel veritabanı motoru üzerinde salt-okunur (read-only) SQL sorguları çalıştırılarak sıfır-halüsinasyon veri analitiği sağlandı.
-- **C-Level Yönetici Özeti & Şeffaf UI:** Streamlit ve Plotly üzerinde Yönetici Özeti, Temel Bulgular, Stratejik İçgörüler ve Data Governance Kartı sunan tam teşekküllü web platformu geliştirildi.
