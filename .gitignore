@@ -21,10 +21,10 @@ build/
 .env.*.local
 
 # ─────────────────────────────────────────────────────────
-# Kullanıcı Sohbet Geçmişi (Gizlilik Koruması)
-# data/sessions altındaki tüm .json sohbet kayıtları engellenir
+# Kullanıcı Sohbet Geçmişi ve Oturum Veri Setleri (Gizlilik)
 # ─────────────────────────────────────────────────────────
 data/sessions/*.json
+data/sessions/datasets/
 !data/sessions/.gitkeep
 
 # ─────────────────────────────────────────────────────────
